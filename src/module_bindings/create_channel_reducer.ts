@@ -6,11 +6,13 @@ import {
   type AlgebraicTypeType as __AlgebraicTypeType,
   type Infer as __Infer,
 } from "spacetimedb";
+import { ChannelType } from "./types";
 
 export default {
-  channelId: __t.u64(),
-  seq: __t.u32(),
-  width: __t.u16(),
-  height: __t.u16(),
-  jpeg: __t.byteArray(),
+  serverId: __t.u64(),
+  categoryId: __t.u64(),
+  name: __t.string(),
+  get channelType() {
+    return ChannelType;
+  },
 };

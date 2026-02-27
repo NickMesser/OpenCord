@@ -8,9 +8,5 @@ import {
 } from "spacetimedb";
 
 export default {
-  channelId: __t.u64(),
-  seq: __t.u32(),
-  width: __t.u16(),
-  height: __t.u16(),
-  jpeg: __t.byteArray(),
+  serverId: __t.u64(),
 };

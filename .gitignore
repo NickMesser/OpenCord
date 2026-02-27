@@ -1,2 +1,12 @@
 **/target
 **/node_modules
+**/.svelte-kit
+**/build
+**/.vite
+.env
+.env.*
+!.env.example
+spacetime.local.json
+*.log
+.DS_Store
+Thumbs.db

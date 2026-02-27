@@ -8,11 +8,9 @@ import {
 } from "spacetimedb";
 
 export default __t.row({
+  id: __t.u64().primaryKey(),
   channelId: __t.u64().name("channel_id"),
-  from: __t.identity(),
-  seq: __t.u32(),
-  sampleRate: __t.u32().name("sample_rate"),
-  channels: __t.u8(),
-  rms: __t.f32(),
-  pcm16le: __t.byteArray(),
+  userId: __t.u64().name("user_id"),
+  identity: __t.identity(),
+  joinedAt: __t.timestamp().name("joined_at"),
 });
