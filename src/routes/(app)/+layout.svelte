@@ -12,6 +12,9 @@
   let showCreateServer = $state(false);
   let newServerName = $state('');
   let createLoading = $state(false);
+  let showJoinServer = $state(false);
+  let joinLink = $state('');
+  let joinError = $state('');
 
   onMount(() => {
     connectStdb();
@@ -54,6 +57,37 @@
     await logout();
     goto('/login');
   }
+
+  function extractInviteCode(input: string): string | null {
+    const trimmed = input.trim();
+    if (!trimmed) return null;
+
+    try {
+      const url = new URL(trimmed);
+      const parts = url.pathname.split('/').filter(Boolean);
+      const inviteIndex = parts.findIndex((p) => p === 'invite');
+      if (inviteIndex >= 0 && parts[inviteIndex + 1]) return parts[inviteIndex + 1];
+    } catch {
+      // Not a full URL, handle below.
+    }
+
+    const raw = trimmed.split(/[?#]/)[0];
+    const match = raw.match(/(?:^|\/)invite\/([A-Za-z0-9_-]+)/);
+    if (match?.[1]) return match[1];
+    return raw;
+  }
+
+  function handleJoinServer() {
+    joinError = '';
+    const code = extractInviteCode(joinLink);
+    if (!code) {
+      joinError = 'Please enter a valid invite link or code';
+      return;
+    }
+    showJoinServer = false;
+    joinLink = '';
+    goto(`/invite/${code}`);
+  }
 </script>
 
 <div class="h-screen flex bg-[#0b0d12] text-[#e9eefc] overflow-hidden">
@@ -91,6 +125,17 @@
     >
       <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
         <path d="M12 5v14M5 12h14"/>
+      </svg>
+    </button>
+
+    <!-- Join server button -->
+    <button
+      onclick={() => { showJoinServer = true; joinError = ''; }}
+      class="w-12 h-12 rounded-2xl bg-[#0f121a] hover:bg-[#5865f2] hover:rounded-xl flex items-center justify-center transition-all duration-200 text-[#5865f2] hover:text-white"
+      title="Join a Server"
+    >
+      <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+        <path d="M10.5 13.5L13.5 10.5M8 16a4 4 0 010-5.657l2.343-2.343a4 4 0 015.657 0m0 0a4 4 0 010 5.657l-2.343 2.343a4 4 0 01-5.657 0"/>
       </svg>
     </button>
 
@@ -149,6 +194,52 @@
             class="px-6 py-2 bg-[#5865f2] hover:bg-[#4752c4] disabled:opacity-50 text-white text-sm font-semibold rounded-lg transition-colors"
           >
             {createLoading ? 'Creating...' : 'Create'}
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+{/if}
+
+<!-- Join server modal -->
+{#if showJoinServer}
+  <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+  <div class="fixed inset-0 bg-black/60 z-50 flex items-center justify-center" onclick={() => showJoinServer = false}>
+    <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+    <div class="bg-[#0f121a] border border-[#1b2230] rounded-2xl p-6 w-full max-w-md" role="dialog" onclick={(e) => e.stopPropagation()}>
+      <h2 class="text-xl font-bold text-[#e9eefc] mb-1">Join a server</h2>
+      <p class="text-sm text-[#8b95a8] mb-6">Paste an invite link or code to join.</p>
+
+      <form onsubmit={(e) => { e.preventDefault(); handleJoinServer(); }}>
+        <label for="inviteLink" class="block text-xs font-semibold text-[#8b95a8] uppercase tracking-wide mb-2">
+          Invite Link
+        </label>
+        <input
+          id="inviteLink"
+          type="text"
+          bind:value={joinLink}
+          placeholder="https://your-domain/invite/abc123"
+          class="w-full bg-[#080a0f] border border-[#1b2230] text-[#e9eefc] rounded-lg px-4 py-3 outline-none focus:border-[#5865f2] transition-colors mb-3"
+        />
+
+        {#if joinError}
+          <p class="text-sm text-red-400 mb-3">{joinError}</p>
+        {/if}
+
+        <div class="flex justify-end gap-3">
+          <button
+            type="button"
+            onclick={() => showJoinServer = false}
+            class="px-4 py-2 text-sm text-[#8b95a8] hover:text-[#e9eefc] transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            disabled={!joinLink.trim()}
+            class="px-6 py-2 bg-[#5865f2] hover:bg-[#4752c4] disabled:opacity-50 text-white text-sm font-semibold rounded-lg transition-colors"
+          >
+            Join
           </button>
         </div>
       </form>

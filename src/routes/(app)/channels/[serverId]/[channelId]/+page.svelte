@@ -1,13 +1,14 @@
 <script lang="ts">
+  import { browser } from '$app/environment';
   import { page } from '$app/stores';
   import { tick } from 'svelte';
   import {
     currentUser, channelsStore, channelMessagesStore, userAccountsStore,
-    serverMembersStore, idEq, sendChannelMessage, deleteMessage,
+    serverMembersStore, userSessionsStore, idEq, sendChannelMessage, deleteMessage,
     voiceMembersStore, channelMediaSettingsStore, setChannelMediaSettings
   } from '$lib/stdb';
   import {
-    joinVoice, leaveVoice, setVideoEnabled,
+    joinVoice, leaveVoice, setVideoEnabled, setScreenShareEnabled,
     voiceState, audioLevelsStore, remoteVideoFramesStore, localVideoStreamStore,
     audioControlStore, setInputGain, setOutputGain, toggleMute, toggleDeafen
   } from '$lib/voice';
@@ -32,11 +33,15 @@
   let videoFps = $state(5);
   let videoJpegQuality = $state(0.55);
   let videoMaxFrameBytes = $state(512000);
+  type ScreenShareQuality = 'low' | 'medium' | 'high';
+  let screenShareQuality = $state<ScreenShareQuality>('medium');
 
   let serverId = $derived($page.params.serverId);
   let channelId = $derived($page.params.channelId);
   let channelIdBig = $derived(BigInt(channelId || '0'));
   let serverIdBig = $derived(BigInt(serverId || '0'));
+
+  const lastChannelKey = (sid: string) => `last_channel:${sid}`;
 
   let channel = $derived(($channelsStore ?? []).find((c: any) => idEq(c.id, channelIdBig)) ?? null);
   let isVoiceChannel = $derived(channel ? channelTypeTag(channel) === 'voice' : false);
@@ -59,8 +64,80 @@
   let channelSettings = $derived((($channelMediaSettingsStore ?? [])
     .find((s: any) => idEq(s.channelId ?? s.channel_id, channelIdBig))) ?? null);
 
+  let presenceNow = $state(Date.now());
+
   function getUser(userId: any) {
     return ($userAccountsStore ?? []).find((u: any) => idEq(u.id, userId)) ?? null;
+  }
+
+  function idKey(id: any): string {
+    if (id === null || id === undefined) return '';
+    if (typeof id === 'bigint') return id.toString();
+    return id?.toString?.() ?? String(id);
+  }
+
+  function timestampToMs(ts: any): number {
+    if (!ts) return 0;
+    try {
+      const v = typeof ts === 'bigint' ? Number(ts / 1000n) : Number(ts) / 1000;
+      return Number.isFinite(v) ? v : 0;
+    } catch {
+      return 0;
+    }
+  }
+
+  let onlineUserIds = $derived(new Set(($userSessionsStore ?? [])
+    .map((s: any) => idKey(s.userId ?? s.user_id))));
+
+  let lastActiveByUser = $derived((() => {
+    const map = new Map<string, number>();
+    for (const session of ($userSessionsStore ?? [])) {
+      const key = idKey(session.userId ?? session.user_id);
+      const ts = timestampToMs(session.connectedAt ?? session.connected_at);
+      if (key) map.set(key, Math.max(map.get(key) ?? 0, ts));
+    }
+    for (const msg of ($channelMessagesStore ?? [])) {
+      const key = idKey(msg.senderId ?? msg.sender_id);
+      const ts = timestampToMs(msg.sentAt ?? msg.sent_at);
+      if (key) map.set(key, Math.max(map.get(key) ?? 0, ts));
+    }
+    for (const vm of ($voiceMembersStore ?? [])) {
+      const key = idKey(vm.userId ?? vm.user_id);
+      const ts = timestampToMs(vm.joinedAt ?? vm.joined_at);
+      if (key) map.set(key, Math.max(map.get(key) ?? 0, ts));
+    }
+    return map;
+  })());
+
+  function isUserInVoice(userId: any): boolean {
+    const key = idKey(userId);
+    if (!key) return false;
+    const channels = $channelsStore ?? [];
+    for (const vm of ($voiceMembersStore ?? [])) {
+      if (idKey(vm.userId ?? vm.user_id) !== key) continue;
+      const chId = vm.channelId ?? vm.channel_id;
+      const ch = channels.find((c: any) => idEq(c.id, chId));
+      if (ch && idEq(ch.serverId ?? ch.server_id, serverIdBig)) return true;
+    }
+    return false;
+  }
+
+  function getUserStatus(userId: any): 'online' | 'away' | 'dnd' | 'offline' {
+    const key = idKey(userId);
+    if (!key || !onlineUserIds.has(key)) return 'offline';
+    if (isUserInVoice(userId)) return 'dnd';
+    const lastActive = lastActiveByUser.get(key) ?? 0;
+    if (lastActive && (presenceNow - lastActive) > 10 * 60 * 1000) return 'away';
+    return 'online';
+  }
+
+  function statusColor(status: 'online' | 'away' | 'dnd' | 'offline'): string {
+    switch (status) {
+      case 'online': return 'bg-green-400';
+      case 'away': return 'bg-yellow-400';
+      case 'dnd': return 'bg-red-400';
+      default: return 'bg-[#5c6370]';
+    }
   }
 
   function getMemberRole(member: any): string {
@@ -109,6 +186,29 @@
   });
 
   $effect(() => {
+    if (!browser || !serverId || !channelId) return;
+    try {
+      localStorage.setItem(lastChannelKey(serverId), channelId);
+      const url = new URL(window.location.href);
+      const targetPath = `/channels/${serverId}`;
+      if (url.pathname !== targetPath) {
+        url.pathname = targetPath;
+        window.history.replaceState(window.history.state, '', url.toString());
+      }
+    } catch {
+      /* ignore storage/history errors */
+    }
+  });
+
+  $effect(() => {
+    if (!browser) return;
+    const id = window.setInterval(() => {
+      presenceNow = Date.now();
+    }, 30000);
+    return () => window.clearInterval(id);
+  });
+
+  $effect(() => {
     if (!channelSettings) return;
     audioTargetSampleRate = Number(channelSettings.audioTargetSampleRate ?? channelSettings.audio_target_sample_rate ?? 16000);
     audioFrameMs = Number(channelSettings.audioFrameMs ?? channelSettings.audio_frame_ms ?? 50);
@@ -144,6 +244,14 @@
 
   async function handleToggleVideo() {
     await setVideoEnabled(!$voiceState.videoEnabled);
+  }
+
+  async function handleToggleScreenShare() {
+    if ($voiceState.screenSharing) {
+      await setScreenShareEnabled(false);
+    } else {
+      await setScreenShareEnabled(true, screenShareQuality);
+    }
   }
 
   async function handleSaveSettings() {
@@ -243,12 +351,31 @@
             </button>
             <button
               onclick={handleToggleVideo}
-              disabled={!videoEnabled}
+              disabled={!videoEnabled || $voiceState.screenSharing}
               class="px-3 py-1.5 text-sm bg-[#1b2230] hover:bg-[#263146] disabled:opacity-50 text-[#e9eefc] rounded-md"
-              title={videoEnabled ? '' : 'Video disabled for this channel'}
+              title={!videoEnabled ? 'Video disabled for this channel' : ($voiceState.screenSharing ? 'Stop screen share to start video' : '')}
             >
               {$voiceState.videoEnabled ? 'Stop Video' : 'Start Video'}
             </button>
+            <div class="flex items-center gap-2">
+              <button
+                onclick={handleToggleScreenShare}
+                class="px-3 py-1.5 text-sm bg-[#1b2230] hover:bg-[#263146] text-[#e9eefc] rounded-md"
+              >
+                {$voiceState.screenSharing ? 'Stop Share' : 'Share Screen'}
+              </button>
+              {#if !$voiceState.screenSharing}
+                <select
+                  bind:value={screenShareQuality}
+                  class="bg-[#0b0d12] border border-[#1b2230] text-[#e9eefc] text-sm rounded-md px-2 py-1.5"
+                  title="Screen share quality"
+                >
+                  <option value="low">Low</option>
+                  <option value="medium">Medium</option>
+                  <option value="high">High</option>
+                </select>
+              {/if}
+            </div>
           {/if}
           {#if isAdmin}
             <button
@@ -322,12 +449,14 @@
         </div>
       {/if}
 
-      {#if $voiceState.videoEnabled || Object.keys($remoteVideoFramesStore ?? {}).length}
+      {#if $voiceState.videoEnabled || $voiceState.screenSharing || Object.keys($remoteVideoFramesStore ?? {}).length}
         <div class="mt-4 grid grid-cols-2 md:grid-cols-3 gap-3">
-          {#if $voiceState.videoEnabled}
+          {#if $voiceState.videoEnabled || $voiceState.screenSharing}
             <div class="rounded-lg overflow-hidden bg-[#0b0d12] border border-[#1b2230]">
               <video bind:this={localVideoEl} autoplay playsinline muted class="w-full h-36 object-cover"></video>
-              <div class="px-2 py-1 text-xs text-[#8b95a8]">You</div>
+              <div class="px-2 py-1 text-xs text-[#8b95a8]">
+                You{$voiceState.screenSharing ? ' (Screen)' : ''}
+              </div>
             </div>
           {/if}
           {#each Object.entries($remoteVideoFramesStore ?? {}) as [id, url]}
@@ -518,9 +647,14 @@
           {role} — {members.length}
         </h4>
         {#each members as m (m.id?.toString?.())}
+          {@const status = getUserStatus(m.user?.id ?? m.userId ?? m.user_id)}
           <div class="flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-[#1b2230]/50 transition-colors">
-            <div class="w-8 h-8 rounded-full bg-[#5865f2] flex items-center justify-center text-xs font-semibold text-white flex-shrink-0">
+            <div class="relative w-8 h-8 rounded-full bg-[#5865f2] flex items-center justify-center text-xs font-semibold text-white flex-shrink-0">
               {(m.user?.username ?? '?')[0]?.toUpperCase()}
+              <span
+                class={`absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-[#0f121a] ${statusColor(status)}`}
+                title={status === 'dnd' ? 'Do not disturb' : status[0].toUpperCase() + status.slice(1)}
+              ></span>
             </div>
             <div class="min-w-0">
               <div class="text-sm text-[#e9eefc] truncate">{m.user?.displayName ?? m.user?.display_name ?? m.user?.username ?? 'Unknown'}</div>

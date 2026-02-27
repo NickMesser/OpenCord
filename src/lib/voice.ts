@@ -25,6 +25,20 @@ type ChannelSettings = {
   videoMaxFrameBytes: number;
 };
 
+export type ScreenShareQuality = 'low' | 'medium' | 'high';
+
+const screenSharePresets: Record<ScreenShareQuality, {
+  width: number;
+  height: number;
+  fps: number;
+  jpegQuality: number;
+  maxFrameBytes: number;
+}> = {
+  low: { width: 640, height: 360, fps: 10, jpegQuality: 0.45, maxFrameBytes: 250000 },
+  medium: { width: 960, height: 540, fps: 12, jpegQuality: 0.55, maxFrameBytes: 400000 },
+  high: { width: 1280, height: 720, fps: 15, jpegQuality: 0.65, maxFrameBytes: 700000 },
+};
+
 const defaultSettings: ChannelSettings = {
   channelId: 0n,
   audioTargetSampleRate: 16000,
@@ -46,6 +60,7 @@ export const voiceState = writable({
   connecting: false,
   error: null as string | null,
   videoEnabled: false,
+  screenSharing: false,
 });
 
 export const audioLevelsStore = writable<Record<string, { rms: number; at: number }>>({});
@@ -72,6 +87,8 @@ const playbackState = new Map<string, { nextTime: number }>();
 
 let videoStream: MediaStream | null = null;
 let videoTimer: number | null = null;
+let screenStream: MediaStream | null = null;
+let screenTimer: number | null = null;
 let videoUrlMap = new Map<string, string>();
 let inputGainValue = 1;
 let outputGainValue = 1;
@@ -96,6 +113,17 @@ function getSettings(channelId: bigint): ChannelSettings {
     videoFps: Number(row.videoFps ?? row.video_fps ?? defaultSettings.videoFps),
     videoJpegQuality: Number(row.videoJpegQuality ?? row.video_jpeg_quality ?? defaultSettings.videoJpegQuality),
     videoMaxFrameBytes: Number(row.videoMaxFrameBytes ?? row.video_max_frame_bytes ?? defaultSettings.videoMaxFrameBytes),
+  };
+}
+
+function getScreenSharePreset(quality: ScreenShareQuality, settings: ChannelSettings) {
+  const preset = screenSharePresets[quality] ?? screenSharePresets.medium;
+  return {
+    width: preset.width,
+    height: preset.height,
+    fps: preset.fps,
+    jpegQuality: preset.jpegQuality,
+    maxFrameBytes: Math.min(settings.videoMaxFrameBytes, preset.maxFrameBytes),
   };
 }
 
@@ -376,6 +404,68 @@ function stopVideoCapture() {
   localVideoStreamStore.set(null);
 }
 
+async function startScreenShare(settings: ChannelSettings, quality: ScreenShareQuality) {
+  if (screenStream) return;
+  const preset = getScreenSharePreset(quality, settings);
+  screenStream = await navigator.mediaDevices.getDisplayMedia({
+    video: {
+      width: preset.width,
+      height: preset.height,
+      frameRate: preset.fps,
+    },
+    audio: false,
+  });
+  localVideoStreamStore.set(screenStream);
+
+  const track = screenStream.getVideoTracks()[0];
+  if (track) {
+    track.onended = () => {
+      stopScreenShare();
+    };
+  }
+
+  const videoEl = document.createElement('video');
+  videoEl.srcObject = screenStream;
+  videoEl.muted = true;
+  videoEl.playsInline = true;
+  await videoEl.play();
+
+  const canvas = document.createElement('canvas');
+  canvas.width = preset.width;
+  canvas.height = preset.height;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return;
+
+  const intervalMs = Math.max(100, Math.floor(1000 / preset.fps));
+  screenTimer = window.setInterval(() => {
+    if (!activeChannelId || !screenStream) return;
+    ctx.drawImage(videoEl, 0, 0, canvas.width, canvas.height);
+    canvas.toBlob((blob) => {
+      if (!blob || !activeChannelId) return;
+      blob.arrayBuffer().then((buf) => {
+        const bytes = new Uint8Array(buf);
+        if (bytes.byteLength > preset.maxFrameBytes) return;
+        sendVideoFrame({
+          channelId: activeChannelId,
+          seq: seq++,
+          width: preset.width,
+          height: preset.height,
+          jpeg: bytes,
+        }).catch(() => undefined);
+      }).catch(() => undefined);
+    }, 'image/jpeg', preset.jpegQuality);
+  }, intervalMs);
+}
+
+function stopScreenShare() {
+  if (screenTimer) window.clearInterval(screenTimer);
+  if (screenStream) screenStream.getTracks().forEach((t) => t.stop());
+  screenTimer = null;
+  screenStream = null;
+  localVideoStreamStore.set(videoStream ?? null);
+  voiceState.update((s) => ({ ...s, screenSharing: false }));
+}
+
 export async function joinVoice(channelId: bigint, opts: { video?: boolean } = {}) {
   if (get(voiceState).connecting) return;
   const current = get(voiceState);
@@ -400,6 +490,7 @@ export async function joinVoice(channelId: bigint, opts: { video?: boolean } = {
       connecting: false,
       error: null,
       videoEnabled: opts.video ?? false,
+      screenSharing: false,
     });
   } catch (e: any) {
     voiceState.update((s) => ({
@@ -415,8 +506,16 @@ export async function leaveVoice() {
   activeChannelId = null;
   stopAudioCapture();
   stopVideoCapture();
+  stopScreenShare();
   playbackState.clear();
-  voiceState.set({ channelId: null, joined: false, connecting: false, error: null, videoEnabled: false });
+  voiceState.set({
+    channelId: null,
+    joined: false,
+    connecting: false,
+    error: null,
+    videoEnabled: false,
+    screenSharing: false,
+  });
   audioLevelsStore.set({});
   remoteVideoFramesStore.set({});
   for (const url of videoUrlMap.values()) URL.revokeObjectURL(url);
@@ -432,11 +531,34 @@ export async function setVideoEnabled(enable: boolean) {
   if (!channelId) return;
   const settings = getSettings(channelId);
   if (enable) {
+    stopScreenShare();
     await startVideoCapture(settings);
   } else {
     stopVideoCapture();
   }
   voiceState.update((s) => ({ ...s, videoEnabled: enable }));
+}
+
+export async function setScreenShareEnabled(enable: boolean, quality: ScreenShareQuality = 'medium') {
+  const channelId = activeChannelId;
+  if (!channelId) return;
+  const settings = getSettings(channelId);
+  if (enable) {
+    stopVideoCapture();
+    voiceState.update((s) => ({ ...s, videoEnabled: false, error: null }));
+    try {
+      await startScreenShare(settings, quality);
+      voiceState.update((s) => ({ ...s, screenSharing: true }));
+    } catch (e: any) {
+      const name = e?.name ?? '';
+      if (name !== 'NotAllowedError' && name !== 'AbortError') {
+        voiceState.update((s) => ({ ...s, error: e?.message ?? String(e) }));
+      }
+      stopScreenShare();
+    }
+  } else {
+    stopScreenShare();
+  }
 }
 
 export function setInputGain(value: number) {

@@ -6,6 +6,7 @@
     channelsStore, inviteLinksStore, idEq,
     createCategory, createChannel, createInvite, deleteServer, leaveServer
   } from '$lib/stdb';
+  import { voiceState, audioControlStore, toggleMute, toggleDeafen, leaveVoice } from '$lib/voice';
 
   let { children } = $props();
 
@@ -56,6 +57,14 @@
   }
 
   let activeChannelId = $derived($page.params.channelId);
+
+  let voiceChannel = $derived(($channelsStore ?? []).find((c: any) => idEq(c.id, $voiceState.channelId)) ?? null);
+  let voiceServer = $derived(voiceChannel
+    ? ($serversStore ?? []).find((s: any) => idEq(s.id, voiceChannel.serverId ?? voiceChannel.server_id))
+    : null);
+  let voiceServerId = $derived(voiceServer?.id?.toString?.() ?? '');
+  let voiceChannelId = $derived(voiceChannel?.id?.toString?.() ?? '');
+  let showVoiceControls = $derived($voiceState.joined || $voiceState.connecting);
 
   async function handleCreateCategory() {
     if (!newCategoryName.trim()) return;
@@ -222,13 +231,63 @@
     {/if}
 
     <!-- User info bar -->
-    <div class="flex items-center gap-2 px-3 py-2 mt-1 bg-[#080a0f] rounded-lg">
+    <div class="flex items-start gap-2 px-3 py-2 mt-1 bg-[#080a0f] rounded-lg">
       <div class="w-8 h-8 rounded-full bg-[#5865f2] flex items-center justify-center text-sm font-semibold text-white flex-shrink-0">
         {($currentUser?.username ?? '?')[0]?.toUpperCase()}
       </div>
-      <div class="min-w-0">
+      <div class="min-w-0 flex-1">
         <div class="text-sm font-semibold text-[#e9eefc] truncate">{$currentUser?.displayName ?? $currentUser?.display_name ?? $currentUser?.username ?? 'User'}</div>
         <div class="text-xs text-[#8b95a8] truncate">{$currentUser?.username ?? ''}</div>
+        {#if showVoiceControls}
+          <div class="mt-2 p-2 rounded-md bg-[#0b0d12] border border-[#1b2230]">
+            <div class="flex items-center justify-between gap-2">
+              <div class="min-w-0">
+                <div class="text-[10px] text-[#8b95a8] uppercase tracking-wide">Voice</div>
+                <div class="text-xs text-[#e9eefc] truncate">
+                  {#if voiceChannel}
+                    <a
+                      class="hover:underline"
+                      href="/channels/{voiceServerId}/{voiceChannelId}"
+                      title="Go to voice channel"
+                    >
+                      #{voiceChannel.name ?? 'Voice Channel'}
+                      {#if voiceServer && !idEq(voiceServer.id, serverIdBig)}
+                        <span class="text-[#8b95a8]"> • {voiceServer.name ?? 'Server'}</span>
+                      {/if}
+                    </a>
+                  {:else}
+                    {$voiceState.connecting ? 'Connecting...' : 'Voice Channel'}
+                  {/if}
+                </div>
+              </div>
+              <button
+                onclick={leaveVoice}
+                class="p-1.5 rounded-md bg-red-900/30 text-red-300 hover:bg-red-900/50"
+                title="Disconnect"
+              >
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                  <path d="M18 8a4 4 0 01-8 0m8 0a4 4 0 10-8 0m8 0v4a4 4 0 01-8 0V8m12 6l4 4m0-4l-4 4"/>
+                </svg>
+              </button>
+            </div>
+            <div class="mt-2 flex items-center gap-1.5">
+              <button
+                onclick={toggleMute}
+                class="px-2 py-1 text-[11px] rounded-md {($audioControlStore.muted ? 'bg-red-900/30 text-red-300' : 'bg-[#1b2230] text-[#e9eefc]')}"
+                title={$audioControlStore.muted ? 'Unmute' : 'Mute'}
+              >
+                {$audioControlStore.muted ? 'Unmute' : 'Mute'}
+              </button>
+              <button
+                onclick={toggleDeafen}
+                class="px-2 py-1 text-[11px] rounded-md {($audioControlStore.deafened ? 'bg-red-900/30 text-red-300' : 'bg-[#1b2230] text-[#e9eefc]')}"
+                title={$audioControlStore.deafened ? 'Undeafen' : 'Deafen'}
+              >
+                {$audioControlStore.deafened ? 'Undeafen' : 'Deafen'}
+              </button>
+            </div>
+          </div>
+        {/if}
       </div>
     </div>
   </div>

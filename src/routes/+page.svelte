@@ -46,7 +46,7 @@
       const firstChannel = ($channelsStore ?? []).find((c: any) => idEq(c.serverId ?? c.server_id, firstServer.id));
       if (firstChannel) {
         redirecting = true;
-        goto(`/channels/${firstServer.id}/${firstChannel.id}`);
+        goto(`/channels/${firstServer.id}`);
         return;
       }
     }
