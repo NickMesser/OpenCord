@@ -309,6 +309,18 @@ fn validate_channel_media_settings(
     Ok(())
 }
 
+const SCREEN_SHARE_RESOLUTIONS: &[(u16, u16)] = &[
+    (640, 360),
+    (960, 540),
+    (1280, 720),
+];
+
+fn is_screen_share_resolution(width: u16, height: u16) -> bool {
+    SCREEN_SHARE_RESOLUTIONS
+        .iter()
+        .any(|(w, h)| *w == width && *h == height)
+}
+
 // ---------------------------------------------------------------------------
 // Lifecycle
 // ---------------------------------------------------------------------------
@@ -871,10 +883,11 @@ pub fn send_video_frame(
     }
 
     let settings = get_or_create_channel_media_settings(ctx, channel_id);
-    if !settings.video_enabled {
+    let is_screen_share = is_screen_share_resolution(width, height);
+    if !settings.video_enabled && !is_screen_share {
         return Err("Video disabled for channel".to_string());
     }
-    if width != settings.video_width || height != settings.video_height {
+    if !is_screen_share && (width != settings.video_width || height != settings.video_height) {
         return Err("Video size mismatch".to_string());
     }
     if jpeg.len() > settings.video_max_frame_bytes as usize {
