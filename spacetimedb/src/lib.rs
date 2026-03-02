@@ -42,6 +42,8 @@ pub struct UserAccount {
     pub status: Option<String>,
     #[default(0u64)]
     pub avatar_file_id: u64,
+    #[default(0u64)]
+    pub banner_file_id: u64,
 }
 
 const MAX_FILE_SIZE: usize = 10 * 1024 * 1024; // 10 MB
@@ -532,6 +534,7 @@ pub fn register(ctx: &ReducerContext, email: String, password: String, username:
         avatar_url: String::new(),
         status: None,
         avatar_file_id: 0,
+        banner_file_id: 0,
         created_at: now,
         public_encryption_key: None,
     });
@@ -675,6 +678,63 @@ pub fn remove_avatar(ctx: &ReducerContext) -> Result<(), String> {
     Ok(())
 }
 
+#[spacetimedb::reducer]
+pub fn update_banner(ctx: &ReducerContext, file_data: Vec<u8>, content_type: String) -> Result<(), String> {
+    let caller = get_caller(ctx)?;
+
+    if file_data.is_empty() {
+        return Err("File data cannot be empty".to_string());
+    }
+    if file_data.len() > MAX_FILE_SIZE {
+        return Err(format!("File exceeds {}MB limit", MAX_FILE_SIZE / 1024 / 1024));
+    }
+
+    let valid_types = ["image/jpeg", "image/png", "image/gif", "image/webp"];
+    if !valid_types.contains(&content_type.as_str()) {
+        return Err("Banner must be JPEG, PNG, GIF, or WebP".to_string());
+    }
+
+    let old_banner_id = caller.banner_file_id;
+
+    let file = ctx.db.file_upload().insert(FileUpload {
+        id: 0,
+        uploader_id: caller.id,
+        filename: format!("banner_{}", caller.id),
+        content_type,
+        size: file_data.len() as u64,
+        data: file_data,
+        uploaded_at: ctx.timestamp,
+    });
+
+    ctx.db.user_account().id().update(UserAccount {
+        banner_file_id: file.id,
+        ..caller
+    });
+
+    if old_banner_id != 0 {
+        ctx.db.file_upload().id().delete(&old_banner_id);
+    }
+
+    Ok(())
+}
+
+#[spacetimedb::reducer]
+pub fn remove_banner(ctx: &ReducerContext) -> Result<(), String> {
+    let caller = get_caller(ctx)?;
+    let old_banner_id = caller.banner_file_id;
+
+    ctx.db.user_account().id().update(UserAccount {
+        banner_file_id: 0,
+        ..caller
+    });
+
+    if old_banner_id != 0 {
+        ctx.db.file_upload().id().delete(&old_banner_id);
+    }
+
+    Ok(())
+}
+
 // ---------------------------------------------------------------------------
 // File Upload Reducers
 // ---------------------------------------------------------------------------
@@ -725,10 +785,12 @@ pub fn delete_file(ctx: &ReducerContext, file_id: u64) -> Result<(), String> {
         return Err("You can only delete your own files".to_string());
     }
 
-    // Prevent deleting a file currently used as someone's avatar
     for user in ctx.db.user_account().iter() {
         if user.avatar_file_id == file_id {
             return Err("Cannot delete a file in use as an avatar".to_string());
+        }
+        if user.banner_file_id == file_id {
+            return Err("Cannot delete a file in use as a banner".to_string());
         }
     }
 

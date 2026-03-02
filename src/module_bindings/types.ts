@@ -204,6 +204,7 @@ export const UserAccount = __t.object("UserAccount", {
   publicEncryptionKey: __t.option(__t.byteArray()),
   status: __t.option(__t.string()),
   avatarFileId: __t.u64(),
+  bannerFileId: __t.u64(),
 });
 export type UserAccount = __Infer<typeof UserAccount>;
 

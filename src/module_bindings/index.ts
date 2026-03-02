@@ -56,6 +56,7 @@ import LogoutReducer from "./logout_reducer";
 import OpenDmThreadReducer from "./open_dm_thread_reducer";
 import RegisterReducer from "./register_reducer";
 import RemoveAvatarReducer from "./remove_avatar_reducer";
+import RemoveBannerReducer from "./remove_banner_reducer";
 import RemoveReactionReducer from "./remove_reaction_reducer";
 import SendAudioFrameReducer from "./send_audio_frame_reducer";
 import SendChannelMessageReducer from "./send_channel_message_reducer";
@@ -66,6 +67,7 @@ import SendVideoFrameReducer from "./send_video_frame_reducer";
 import SetChannelMediaSettingsReducer from "./set_channel_media_settings_reducer";
 import SetPublicEncryptionKeyReducer from "./set_public_encryption_key_reducer";
 import UpdateAvatarReducer from "./update_avatar_reducer";
+import UpdateBannerReducer from "./update_banner_reducer";
 import UpdateProfileReducer from "./update_profile_reducer";
 import UploadFileReducer from "./upload_file_reducer";
 
@@ -347,6 +349,7 @@ const reducersSchema = __reducers(
   __reducerSchema("open_dm_thread", OpenDmThreadReducer),
   __reducerSchema("register", RegisterReducer),
   __reducerSchema("remove_avatar", RemoveAvatarReducer),
+  __reducerSchema("remove_banner", RemoveBannerReducer),
   __reducerSchema("remove_reaction", RemoveReactionReducer),
   __reducerSchema("send_audio_frame", SendAudioFrameReducer),
   __reducerSchema("send_channel_message", SendChannelMessageReducer),
@@ -357,6 +360,7 @@ const reducersSchema = __reducers(
   __reducerSchema("set_channel_media_settings", SetChannelMediaSettingsReducer),
   __reducerSchema("set_public_encryption_key", SetPublicEncryptionKeyReducer),
   __reducerSchema("update_avatar", UpdateAvatarReducer),
+  __reducerSchema("update_banner", UpdateBannerReducer),
   __reducerSchema("update_profile", UpdateProfileReducer),
   __reducerSchema("upload_file", UploadFileReducer),
 );

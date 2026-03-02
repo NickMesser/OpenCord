@@ -536,6 +536,18 @@ export function removeAvatar() {
   return Promise.resolve(callReducer(conn, 'remove_avatar', {}));
 }
 
+export function updateBanner(fileData: Uint8Array, contentType: string) {
+  const conn = get(connStore);
+  if (!conn) return Promise.reject(new Error('Not connected'));
+  return Promise.resolve(callReducer(conn, 'update_banner', { fileData, contentType }));
+}
+
+export function removeBanner() {
+  const conn = get(connStore);
+  if (!conn) return Promise.reject(new Error('Not connected'));
+  return Promise.resolve(callReducer(conn, 'remove_banner', {}));
+}
+
 export function uploadFile(filename: string, contentType: string, data: Uint8Array) {
   const conn = get(connStore);
   if (!conn) return Promise.reject(new Error('Not connected'));

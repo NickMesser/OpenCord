@@ -21,4 +21,5 @@ export default __t.row({
   publicEncryptionKey: __t.option(__t.byteArray()).name("public_encryption_key"),
   status: __t.option(__t.string()),
   avatarFileId: __t.u64().name("avatar_file_id"),
+  bannerFileId: __t.u64().name("banner_file_id"),
 });
