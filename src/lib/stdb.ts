@@ -24,6 +24,7 @@ export const dmThreadsStore = writable<any[]>([]);
 export const dmMembersStore = writable<any[]>([]);
 export const dmMessagesStore = writable<any[]>([]);
 export const dmCallMembersStore = writable<any[]>([]);
+export const fileUploadsStore = writable<any[]>([]);
 
 export const currentUser = derived(
   [identityStore, userSessionsStore, userAccountsStore],
@@ -205,6 +206,7 @@ function attachCallbacks(conn: DbConnection) {
   bind('dm_member', dmMembersStore, upsertById, removeById);
   bind('dm_message', dmMessagesStore, upsertById, removeById);
   bind('dm_call_member', dmCallMembersStore, upsertById, removeById);
+  bind('file_upload', fileUploadsStore, upsertById, removeById);
 }
 
 function loadInitialData(conn: DbConnection) {
@@ -226,6 +228,7 @@ function loadInitialData(conn: DbConnection) {
   load('dm_member', dmMembersStore);
   load('dm_message', dmMessagesStore);
   load('dm_call_member', dmCallMembersStore);
+  load('file_upload', fileUploadsStore);
 }
 
 // ---------------------------------------------------------------------------
@@ -510,6 +513,52 @@ export function sendDmVideoFrame(payload: {
   const conn = get(connStore);
   if (!conn) return Promise.reject(new Error('Not connected'));
   return Promise.resolve(callReducer(conn, 'send_dm_video_frame', payload));
+}
+
+export function updateProfile(displayName: string, status: string) {
+  const conn = get(connStore);
+  if (!conn) return Promise.reject(new Error('Not connected'));
+  return Promise.resolve(callReducer(conn, 'update_profile', { displayName, status }));
+}
+
+export function updateAvatar(fileData: Uint8Array, contentType: string) {
+  const conn = get(connStore);
+  if (!conn) return Promise.reject(new Error('Not connected'));
+  return Promise.resolve(callReducer(conn, 'update_avatar', { fileData, contentType }));
+}
+
+export function removeAvatar() {
+  const conn = get(connStore);
+  if (!conn) return Promise.reject(new Error('Not connected'));
+  return Promise.resolve(callReducer(conn, 'remove_avatar', {}));
+}
+
+export function uploadFile(filename: string, contentType: string, data: Uint8Array) {
+  const conn = get(connStore);
+  if (!conn) return Promise.reject(new Error('Not connected'));
+  return Promise.resolve(callReducer(conn, 'upload_file', { filename, contentType, data }));
+}
+
+export function deleteFile(fileId: bigint) {
+  const conn = get(connStore);
+  if (!conn) return Promise.reject(new Error('Not connected'));
+  return Promise.resolve(callReducer(conn, 'delete_file', { fileId }));
+}
+
+export function getFileDataUrl(fileId: any, files: any[]): string | null {
+  const fid = toBigIntId(fileId);
+  if (fid === 0n) return null;
+  const file = files.find((f: any) => toBigIntId(f.id) === fid);
+  if (!file) return null;
+  const ct = file.contentType ?? file.content_type ?? 'application/octet-stream';
+  const data = file.data;
+  if (!data || data.length === 0) return null;
+  const bytes = data instanceof Uint8Array ? data : new Uint8Array(data);
+  let binary = '';
+  for (let i = 0; i < bytes.length; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return `data:${ct};base64,${btoa(binary)}`;
 }
 
 export function getMyDmThreads(userId: any, threads: any[], members: any[]) {

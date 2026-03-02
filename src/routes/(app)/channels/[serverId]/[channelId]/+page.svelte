@@ -15,6 +15,8 @@
     audioControlStore, setInputGain, setOutputGain, toggleMute, toggleDeafen
   } from '$lib/voice';
   import { mobileNavOpen, mobileMembersOpen } from '$lib/mobile-nav';
+  import MessageContent from '$lib/components/MessageContent.svelte';
+  import UserAvatar from '$lib/components/UserAvatar.svelte';
 
   let messageText = $state('');
   let messagesEl: HTMLDivElement | null = $state(null);
@@ -344,8 +346,8 @@
         {#each members as m (m.id?.toString?.())}
           {@const status = getUserStatus(m.user?.id ?? m.userId ?? m.user_id)}
           <div class="flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-[#1b2230]/50 transition-colors">
-            <div class="relative w-8 h-8 rounded-full bg-[#5865f2] flex items-center justify-center text-xs font-semibold text-white flex-shrink-0">
-              {(m.user?.username ?? '?')[0]?.toUpperCase()}
+            <div class="relative flex-shrink-0">
+              <UserAvatar user={m.user} size="sm" />
               <span
                 class={`absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-[#0f121a] ${statusColor(status)}`}
                 title={status === 'dnd' ? 'Do not disturb' : status[0].toUpperCase() + status.slice(1)}
@@ -353,6 +355,9 @@
             </div>
             <div class="min-w-0">
               <div class="text-sm text-[#e9eefc] truncate">{m.user?.displayName ?? m.user?.display_name ?? m.user?.username ?? 'Unknown'}</div>
+              {#if m.user?.status}
+                <div class="text-xs text-[#8b95a8] truncate">{m.user.status}</div>
+              {/if}
             </div>
             {#if !idEq(m.user?.id, $currentUser?.id)}
               <button
@@ -644,8 +649,8 @@
 
         {#if !sameSender}
           <div class="flex items-start gap-3 pt-3 group hover:bg-[#1b2230]/30 px-2 -mx-2 rounded-md">
-            <div class="w-8 h-8 md:w-10 md:h-10 rounded-full bg-[#5865f2] flex items-center justify-center text-xs md:text-sm font-semibold text-white flex-shrink-0 mt-0.5">
-              {(sender?.username ?? '?')[0]?.toUpperCase()}
+            <div class="mt-0.5">
+              <UserAvatar user={sender} size="md" />
             </div>
             <div class="min-w-0 flex-1">
               <div class="flex items-baseline gap-2 flex-wrap">
@@ -660,14 +665,14 @@
                   </button>
                 {/if}
               </div>
-              <p class="text-[#e9eefc] text-sm break-words whitespace-pre-wrap">{msg.content}</p>
+              <MessageContent text={msg.content} />
             </div>
           </div>
         {:else}
           <div class="flex items-start gap-3 group hover:bg-[#1b2230]/30 px-2 -mx-2 rounded-md">
             <div class="w-8 md:w-10 flex-shrink-0"></div>
             <div class="min-w-0 flex-1 flex items-start gap-2">
-              <p class="text-[#e9eefc] text-sm break-words whitespace-pre-wrap flex-1">{msg.content}</p>
+              <div class="flex-1"><MessageContent text={msg.content} /></div>
               {#if isOwn}
                 <button
                   onclick={() => handleDelete(msg.id)}

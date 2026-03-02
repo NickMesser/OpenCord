@@ -22,6 +22,8 @@
     dmCallState
   } from '$lib/voice';
   import { mobileNavOpen } from '$lib/mobile-nav';
+  import MessageContent from '$lib/components/MessageContent.svelte';
+  import UserAvatar from '$lib/components/UserAvatar.svelte';
 
   let messageText = $state('');
   let messagesEl: HTMLDivElement | null = $state(null);
@@ -154,6 +156,9 @@
           <path d="M15 19l-7-7 7-7"/>
         </svg>
       </a>
+      {#if other}
+        <UserAvatar user={other} size="sm" />
+      {/if}
       <div class="min-w-0">
         <div class="text-sm text-[#e9eefc] font-semibold truncate">{other?.displayName ?? other?.display_name ?? other?.username ?? 'Direct Message'}</div>
         <div class="text-[11px] text-[#8b95a8] truncate">@{other?.username ?? ''}</div>
@@ -198,7 +203,11 @@
               <button onclick={() => handleDelete(msg.id)} class="ml-auto text-xs text-red-400 hover:text-red-300">Delete</button>
             {/if}
           </div>
-          <p class="text-sm text-[#e9eefc] break-words whitespace-pre-wrap">{decryptedMap[key] ?? '[Decrypting...]'}</p>
+          {#if decryptedMap[key]}
+            <MessageContent text={decryptedMap[key]} />
+          {:else}
+            <p class="text-sm text-[#e9eefc] break-words whitespace-pre-wrap">[Decrypting...]</p>
+          {/if}
         </div>
       {/each}
     {/if}

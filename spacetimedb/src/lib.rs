@@ -38,6 +38,26 @@ pub struct UserAccount {
     pub created_at: Timestamp,
     #[default(None::<Vec<u8>>)]
     pub public_encryption_key: Option<Vec<u8>>,
+    #[default(None::<String>)]
+    pub status: Option<String>,
+    #[default(0u64)]
+    pub avatar_file_id: u64,
+}
+
+const MAX_FILE_SIZE: usize = 10 * 1024 * 1024; // 10 MB
+
+#[spacetimedb::table(accessor = file_upload, public)]
+#[derive(Clone)]
+pub struct FileUpload {
+    #[primary_key]
+    #[auto_inc]
+    pub id: u64,
+    pub uploader_id: u64,
+    pub filename: String,
+    pub content_type: String,
+    pub data: Vec<u8>,
+    pub size: u64,
+    pub uploaded_at: Timestamp,
 }
 
 #[spacetimedb::table(accessor = user_session, public)]
@@ -497,6 +517,8 @@ pub fn register(ctx: &ReducerContext, email: String, password: String, username:
         password_hash: hash,
         display_name: username,
         avatar_url: String::new(),
+        status: None,
+        avatar_file_id: 0,
         created_at: now,
         public_encryption_key: None,
     });
@@ -553,6 +575,151 @@ pub fn set_public_encryption_key(ctx: &ReducerContext, public_encryption_key: Ve
         public_encryption_key: Some(public_encryption_key),
         ..caller
     });
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Profile Reducers
+// ---------------------------------------------------------------------------
+
+#[spacetimedb::reducer]
+pub fn update_profile(ctx: &ReducerContext, display_name: String, status: String) -> Result<(), String> {
+    let caller = get_caller(ctx)?;
+    let display_name = display_name.trim().to_string();
+    let status = status.trim().to_string();
+
+    if display_name.is_empty() || display_name.len() > 32 {
+        return Err("Display name must be 1-32 characters".to_string());
+    }
+    if status.len() > 128 {
+        return Err("Status must be <= 128 characters".to_string());
+    }
+
+    let status_opt = if status.is_empty() { None } else { Some(status) };
+
+    ctx.db.user_account().id().update(UserAccount {
+        display_name,
+        status: status_opt,
+        ..caller
+    });
+    Ok(())
+}
+
+#[spacetimedb::reducer]
+pub fn update_avatar(ctx: &ReducerContext, file_data: Vec<u8>, content_type: String) -> Result<(), String> {
+    let caller = get_caller(ctx)?;
+
+    if file_data.is_empty() {
+        return Err("File data cannot be empty".to_string());
+    }
+    if file_data.len() > MAX_FILE_SIZE {
+        return Err(format!("File exceeds {}MB limit", MAX_FILE_SIZE / 1024 / 1024));
+    }
+
+    let valid_types = ["image/jpeg", "image/png", "image/gif", "image/webp"];
+    if !valid_types.contains(&content_type.as_str()) {
+        return Err("Avatar must be JPEG, PNG, GIF, or WebP".to_string());
+    }
+
+    let old_avatar_id = caller.avatar_file_id;
+
+    let file = ctx.db.file_upload().insert(FileUpload {
+        id: 0,
+        uploader_id: caller.id,
+        filename: format!("avatar_{}", caller.id),
+        content_type,
+        size: file_data.len() as u64,
+        data: file_data,
+        uploaded_at: ctx.timestamp,
+    });
+
+    ctx.db.user_account().id().update(UserAccount {
+        avatar_file_id: file.id,
+        ..caller
+    });
+
+    if old_avatar_id != 0 {
+        ctx.db.file_upload().id().delete(&old_avatar_id);
+    }
+
+    Ok(())
+}
+
+#[spacetimedb::reducer]
+pub fn remove_avatar(ctx: &ReducerContext) -> Result<(), String> {
+    let caller = get_caller(ctx)?;
+    let old_avatar_id = caller.avatar_file_id;
+
+    ctx.db.user_account().id().update(UserAccount {
+        avatar_file_id: 0,
+        ..caller
+    });
+
+    if old_avatar_id != 0 {
+        ctx.db.file_upload().id().delete(&old_avatar_id);
+    }
+
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// File Upload Reducers
+// ---------------------------------------------------------------------------
+
+#[spacetimedb::reducer]
+pub fn upload_file(
+    ctx: &ReducerContext,
+    filename: String,
+    content_type: String,
+    data: Vec<u8>,
+) -> Result<(), String> {
+    let caller = get_caller(ctx)?;
+    let filename = filename.trim().to_string();
+
+    if filename.is_empty() || filename.len() > 255 {
+        return Err("Filename must be 1-255 characters".to_string());
+    }
+    if data.is_empty() {
+        return Err("File data cannot be empty".to_string());
+    }
+    if data.len() > MAX_FILE_SIZE {
+        return Err(format!("File exceeds {}MB limit", MAX_FILE_SIZE / 1024 / 1024));
+    }
+    if content_type.is_empty() || content_type.len() > 255 {
+        return Err("Invalid content type".to_string());
+    }
+
+    ctx.db.file_upload().insert(FileUpload {
+        id: 0,
+        uploader_id: caller.id,
+        filename,
+        content_type,
+        size: data.len() as u64,
+        data,
+        uploaded_at: ctx.timestamp,
+    });
+
+    Ok(())
+}
+
+#[spacetimedb::reducer]
+pub fn delete_file(ctx: &ReducerContext, file_id: u64) -> Result<(), String> {
+    let caller = get_caller(ctx)?;
+    let file = ctx.db.file_upload().id().find(&file_id)
+        .ok_or_else(|| "File not found".to_string())?;
+
+    if file.uploader_id != caller.id {
+        return Err("You can only delete your own files".to_string());
+    }
+
+    // Prevent deleting a file currently used as someone's avatar
+    for user in ctx.db.user_account().iter() {
+        if user.avatar_file_id == file_id {
+            return Err("Cannot delete a file in use as an avatar".to_string());
+        }
+    }
+
+    ctx.db.file_upload().id().delete(&file_id);
     Ok(())
 }
 

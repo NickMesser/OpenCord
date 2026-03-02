@@ -5,10 +5,11 @@
   import { fly, fade } from 'svelte/transition';
   import {
     connectStdb, isConnected, isLoggedIn, currentUser,
-    serversStore, serverMembersStore, idEq,
-    createServer, logout
+    serversStore, serverMembersStore, fileUploadsStore, idEq,
+    createServer, getFileDataUrl
   } from '$lib/stdb';
   import { mobileNavOpen, mobileMembersOpen } from '$lib/mobile-nav';
+  import ProfileModal from '$lib/components/ProfileModal.svelte';
 
   let { children } = $props();
 
@@ -18,6 +19,13 @@
   let showJoinServer = $state(false);
   let joinLink = $state('');
   let joinError = $state('');
+  let showProfile = $state(false);
+
+  let myAvatarUrl = $derived(
+    $currentUser
+      ? getFileDataUrl($currentUser.avatarFileId ?? $currentUser.avatar_file_id, $fileUploadsStore ?? [])
+      : null
+  );
 
   onMount(() => {
     connectStdb();
@@ -60,11 +68,6 @@
     } finally {
       createLoading = false;
     }
-  }
-
-  async function handleLogout() {
-    await logout();
-    goto('/login');
   }
 
   function extractInviteCode(input: string): string | null {
@@ -155,13 +158,17 @@
   <div class="flex-1"></div>
 
   <button
-    onclick={handleLogout}
-    class="w-12 h-12 rounded-2xl bg-[#0f121a] hover:bg-red-900/50 flex items-center justify-center transition-all duration-200 text-[#8b95a8] hover:text-red-400"
-    title="Log out"
+    onclick={() => showProfile = true}
+    class="w-12 h-12 rounded-full bg-[#5865f2] hover:ring-2 hover:ring-[#5865f2] flex items-center justify-center transition-all duration-200 overflow-hidden flex-shrink-0"
+    title="Profile"
   >
-    <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-      <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9"/>
-    </svg>
+    {#if myAvatarUrl}
+      <img src={myAvatarUrl} alt="My avatar" class="w-full h-full object-cover" />
+    {:else}
+      <span class="text-sm font-semibold text-white">
+        {($currentUser?.username ?? '?')[0]?.toUpperCase()}
+      </span>
+    {/if}
   </button>
 {/snippet}
 
@@ -227,6 +234,9 @@
     </div>
   </div>
 {/if}
+
+<!-- Profile modal -->
+<ProfileModal bind:open={showProfile} />
 
 <!-- Join server modal -->
 {#if showJoinServer}

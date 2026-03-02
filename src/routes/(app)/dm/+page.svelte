@@ -13,6 +13,7 @@
   } from '$lib/stdb';
   import { ensureLocalE2eeKey, getLocalPublicE2eeKey } from '$lib/dm-crypto';
   import { mobileNavOpen } from '$lib/mobile-nav';
+  import UserAvatar from '$lib/components/UserAvatar.svelte';
 
   let search = $state('');
   let syncingKey = false;
@@ -111,10 +112,13 @@
       {#each users as u (u.id?.toString?.())}
         <button
           onclick={() => startDm(u.id)}
-          class="w-full text-left px-3 py-2 rounded-lg hover:bg-[#1b2230]/60 transition-colors"
+          class="w-full text-left flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-[#1b2230]/60 transition-colors"
         >
-          <div class="text-sm text-[#e9eefc] truncate">{u.displayName ?? u.display_name ?? u.username}</div>
-          <div class="text-xs text-[#8b95a8] truncate">@{u.username}</div>
+          <UserAvatar user={u} size="sm" />
+          <div class="min-w-0">
+            <div class="text-sm text-[#e9eefc] truncate">{u.displayName ?? u.display_name ?? u.username}</div>
+            <div class="text-xs text-[#8b95a8] truncate">@{u.username}</div>
+          </div>
         </button>
       {/each}
     </div>
@@ -131,10 +135,15 @@
           {@const other = getOtherDmParticipant(t.id, $currentUser.id, $dmMembersStore ?? [], $userAccountsStore ?? [])}
           <a
             href="/dm/{t.id}"
-            class="block px-3 py-2 rounded-lg hover:bg-[#1b2230]/60 transition-colors"
+            class="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-[#1b2230]/60 transition-colors"
           >
-            <div class="text-sm text-[#e9eefc]">{other?.displayName ?? other?.display_name ?? other?.username ?? 'Unknown'}</div>
-            <div class="text-xs text-[#8b95a8]">@{other?.username ?? 'user'}</div>
+            {#if other}
+              <UserAvatar user={other} size="sm" />
+            {/if}
+            <div class="min-w-0">
+              <div class="text-sm text-[#e9eefc]">{other?.displayName ?? other?.display_name ?? other?.username ?? 'Unknown'}</div>
+              <div class="text-xs text-[#8b95a8]">@{other?.username ?? 'user'}</div>
+            </div>
           </a>
         {/each}
       </div>
