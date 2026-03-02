@@ -25,6 +25,7 @@ export const dmMembersStore = writable<any[]>([]);
 export const dmMessagesStore = writable<any[]>([]);
 export const dmCallMembersStore = writable<any[]>([]);
 export const fileUploadsStore = writable<any[]>([]);
+export const messageReactionsStore = writable<any[]>([]);
 
 export const currentUser = derived(
   [identityStore, userSessionsStore, userAccountsStore],
@@ -207,6 +208,7 @@ function attachCallbacks(conn: DbConnection) {
   bind('dm_message', dmMessagesStore, upsertById, removeById);
   bind('dm_call_member', dmCallMembersStore, upsertById, removeById);
   bind('file_upload', fileUploadsStore, upsertById, removeById);
+  bind('message_reaction', messageReactionsStore, upsertById, removeById);
 }
 
 function loadInitialData(conn: DbConnection) {
@@ -229,6 +231,7 @@ function loadInitialData(conn: DbConnection) {
   load('dm_message', dmMessagesStore);
   load('dm_call_member', dmCallMembersStore);
   load('file_upload', fileUploadsStore);
+  load('message_reaction', messageReactionsStore);
 }
 
 // ---------------------------------------------------------------------------
@@ -537,6 +540,18 @@ export function uploadFile(filename: string, contentType: string, data: Uint8Arr
   const conn = get(connStore);
   if (!conn) return Promise.reject(new Error('Not connected'));
   return Promise.resolve(callReducer(conn, 'upload_file', { filename, contentType, data }));
+}
+
+export function addReaction(messageId: bigint, emoji: string) {
+  const conn = get(connStore);
+  if (!conn) return Promise.reject(new Error('Not connected'));
+  return Promise.resolve(callReducer(conn, 'add_reaction', { messageId, emoji }));
+}
+
+export function removeReaction(messageId: bigint, emoji: string) {
+  const conn = get(connStore);
+  if (!conn) return Promise.reject(new Error('Not connected'));
+  return Promise.resolve(callReducer(conn, 'remove_reaction', { messageId, emoji }));
 }
 
 export function deleteFile(fileId: bigint) {

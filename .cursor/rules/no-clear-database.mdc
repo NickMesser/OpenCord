@@ -1,0 +1,18 @@
+---
+description: Never wipe or clear the SpacetimeDB database when publishing
+alwaysApply: true
+---
+
+# Never Clear the Database
+
+When publishing the SpacetimeDB module, **NEVER** use the `--clear-database` flag.
+
+```bash
+# ❌ WRONG — destroys all user data
+spacetime publish opencord --clear-database -y --module-path ./spacetimedb
+
+# ✅ CORRECT — preserves existing data
+spacetime publish opencord --module-path ./spacetimedb
+```
+
+This applies to all publish commands regardless of target server (local or maincloud). User data must be preserved across deploys.

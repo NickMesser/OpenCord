@@ -200,6 +200,18 @@ pub struct VideoFrameEvent {
     pub jpeg: Vec<u8>,
 }
 
+#[spacetimedb::table(accessor = message_reaction, public)]
+#[derive(Clone)]
+pub struct MessageReaction {
+    #[primary_key]
+    #[auto_inc]
+    pub id: u64,
+    pub message_id: u64,
+    pub user_id: u64,
+    pub emoji: String,
+    pub created_at: Timestamp,
+}
+
 #[spacetimedb::table(accessor = dm_thread, public)]
 #[derive(Clone)]
 pub struct DmThread {
@@ -795,6 +807,10 @@ pub fn delete_server(ctx: &ReducerContext, server_id: u64) -> Result<(), String>
     let chan_ids: Vec<u64> = ctx.db.channel().iter().filter(|c| c.server_id == server_id).map(|c| c.id).collect();
     for ch_id in &chan_ids {
         let msg_ids: Vec<u64> = ctx.db.channel_message().iter().filter(|m| m.channel_id == *ch_id).map(|m| m.id).collect();
+        for mid in &msg_ids {
+            let reaction_ids: Vec<u64> = ctx.db.message_reaction().iter().filter(|r| r.message_id == *mid).map(|r| r.id).collect();
+            for rid in reaction_ids { ctx.db.message_reaction().id().delete(&rid); }
+        }
         for mid in msg_ids { ctx.db.channel_message().id().delete(&mid); }
         let voice_ids: Vec<u64> = ctx.db.voice_member().iter().filter(|v| v.channel_id == *ch_id).map(|v| v.id).collect();
         for vid in voice_ids { ctx.db.voice_member().id().delete(&vid); }
@@ -992,6 +1008,15 @@ pub fn delete_channel(ctx: &ReducerContext, channel_id: u64) -> Result<(), Strin
         .filter(|m| m.channel_id == channel_id)
         .map(|m| m.id)
         .collect();
+    for mid in &msg_ids {
+        let reaction_ids: Vec<u64> = ctx.db.message_reaction().iter()
+            .filter(|r| r.message_id == *mid)
+            .map(|r| r.id)
+            .collect();
+        for rid in reaction_ids {
+            ctx.db.message_reaction().id().delete(&rid);
+        }
+    }
     for mid in msg_ids {
         ctx.db.channel_message().id().delete(&mid);
     }
@@ -1249,7 +1274,65 @@ pub fn delete_message(ctx: &ReducerContext, message_id: u64) -> Result<(), Strin
         }
     }
 
+    let reaction_ids: Vec<u64> = ctx.db.message_reaction().iter()
+        .filter(|r| r.message_id == message_id)
+        .map(|r| r.id)
+        .collect();
+    for rid in reaction_ids {
+        ctx.db.message_reaction().id().delete(&rid);
+    }
+
     ctx.db.channel_message().id().delete(&message_id);
+    Ok(())
+}
+
+#[spacetimedb::reducer]
+pub fn add_reaction(ctx: &ReducerContext, message_id: u64, emoji: String) -> Result<(), String> {
+    let caller = get_caller(ctx)?;
+    let emoji = emoji.trim().to_string();
+
+    if emoji.is_empty() || emoji.len() > 32 {
+        return Err("Invalid emoji".to_string());
+    }
+
+    let msg = ctx.db.channel_message().id().find(&message_id)
+        .ok_or_else(|| "Message not found".to_string())?;
+    let ch = ctx.db.channel().id().find(&msg.channel_id)
+        .ok_or_else(|| "Channel not found".to_string())?;
+
+    let is_member = ctx.db.server_member().iter()
+        .any(|m| m.server_id == ch.server_id && m.user_id == caller.id);
+    if !is_member {
+        return Err("Not a member of this server".to_string());
+    }
+
+    let already = ctx.db.message_reaction().iter()
+        .any(|r| r.message_id == message_id && r.user_id == caller.id && r.emoji == emoji);
+    if already {
+        return Err("Already reacted with this emoji".to_string());
+    }
+
+    ctx.db.message_reaction().insert(MessageReaction {
+        id: 0,
+        message_id,
+        user_id: caller.id,
+        emoji,
+        created_at: ctx.timestamp,
+    });
+
+    Ok(())
+}
+
+#[spacetimedb::reducer]
+pub fn remove_reaction(ctx: &ReducerContext, message_id: u64, emoji: String) -> Result<(), String> {
+    let caller = get_caller(ctx)?;
+    let emoji = emoji.trim().to_string();
+
+    let reaction = ctx.db.message_reaction().iter()
+        .find(|r| r.message_id == message_id && r.user_id == caller.id && r.emoji == emoji)
+        .ok_or_else(|| "Reaction not found".to_string())?;
+
+    ctx.db.message_reaction().id().delete(&reaction.id);
     Ok(())
 }
 

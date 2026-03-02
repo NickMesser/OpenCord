@@ -6,6 +6,7 @@
 import { type Infer as __Infer } from "spacetimedb";
 
 // Import all reducer arg schemas
+import AddReactionReducer from "../add_reaction_reducer";
 import CreateCategoryReducer from "../create_category_reducer";
 import CreateChannelReducer from "../create_channel_reducer";
 import CreateInviteReducer from "../create_invite_reducer";
@@ -27,6 +28,7 @@ import LogoutReducer from "../logout_reducer";
 import OpenDmThreadReducer from "../open_dm_thread_reducer";
 import RegisterReducer from "../register_reducer";
 import RemoveAvatarReducer from "../remove_avatar_reducer";
+import RemoveReactionReducer from "../remove_reaction_reducer";
 import SendAudioFrameReducer from "../send_audio_frame_reducer";
 import SendChannelMessageReducer from "../send_channel_message_reducer";
 import SendDmAudioFrameReducer from "../send_dm_audio_frame_reducer";
@@ -39,6 +41,7 @@ import UpdateAvatarReducer from "../update_avatar_reducer";
 import UpdateProfileReducer from "../update_profile_reducer";
 import UploadFileReducer from "../upload_file_reducer";
 
+export type AddReactionParams = __Infer<typeof AddReactionReducer>;
 export type CreateCategoryParams = __Infer<typeof CreateCategoryReducer>;
 export type CreateChannelParams = __Infer<typeof CreateChannelReducer>;
 export type CreateInviteParams = __Infer<typeof CreateInviteReducer>;
@@ -60,6 +63,7 @@ export type LogoutParams = __Infer<typeof LogoutReducer>;
 export type OpenDmThreadParams = __Infer<typeof OpenDmThreadReducer>;
 export type RegisterParams = __Infer<typeof RegisterReducer>;
 export type RemoveAvatarParams = __Infer<typeof RemoveAvatarReducer>;
+export type RemoveReactionParams = __Infer<typeof RemoveReactionReducer>;
 export type SendAudioFrameParams = __Infer<typeof SendAudioFrameReducer>;
 export type SendChannelMessageParams = __Infer<typeof SendChannelMessageReducer>;
 export type SendDmAudioFrameParams = __Infer<typeof SendDmAudioFrameReducer>;

@@ -34,6 +34,7 @@ import {
 } from "spacetimedb";
 
 // Import all reducer arg schemas
+import AddReactionReducer from "./add_reaction_reducer";
 import CreateCategoryReducer from "./create_category_reducer";
 import CreateChannelReducer from "./create_channel_reducer";
 import CreateInviteReducer from "./create_invite_reducer";
@@ -55,6 +56,7 @@ import LogoutReducer from "./logout_reducer";
 import OpenDmThreadReducer from "./open_dm_thread_reducer";
 import RegisterReducer from "./register_reducer";
 import RemoveAvatarReducer from "./remove_avatar_reducer";
+import RemoveReactionReducer from "./remove_reaction_reducer";
 import SendAudioFrameReducer from "./send_audio_frame_reducer";
 import SendChannelMessageReducer from "./send_channel_message_reducer";
 import SendDmAudioFrameReducer from "./send_dm_audio_frame_reducer";
@@ -83,6 +85,7 @@ import DmThreadRow from "./dm_thread_table";
 import DmVideoFrameEventRow from "./dm_video_frame_event_table";
 import FileUploadRow from "./file_upload_table";
 import InviteLinkRow from "./invite_link_table";
+import MessageReactionRow from "./message_reaction_table";
 import ServerRow from "./server_table";
 import ServerMemberRow from "./server_member_table";
 import UserAccountRow from "./user_account_table";
@@ -236,6 +239,17 @@ const tablesSchema = __schema({
       { name: 'invite_link_id_key', constraint: 'unique', columns: ['id'] },
     ],
   }, InviteLinkRow),
+  message_reaction: __table({
+    name: 'message_reaction',
+    indexes: [
+      { name: 'id', algorithm: 'btree', columns: [
+        'id',
+      ] },
+    ],
+    constraints: [
+      { name: 'message_reaction_id_key', constraint: 'unique', columns: ['id'] },
+    ],
+  }, MessageReactionRow),
   server: __table({
     name: 'server',
     indexes: [
@@ -311,6 +325,7 @@ const tablesSchema = __schema({
 
 /** The schema information for all reducers in this module. This is defined the same way as the reducers would have been defined in the server, except the body of the reducer is omitted in code generation. */
 const reducersSchema = __reducers(
+  __reducerSchema("add_reaction", AddReactionReducer),
   __reducerSchema("create_category", CreateCategoryReducer),
   __reducerSchema("create_channel", CreateChannelReducer),
   __reducerSchema("create_invite", CreateInviteReducer),
@@ -332,6 +347,7 @@ const reducersSchema = __reducers(
   __reducerSchema("open_dm_thread", OpenDmThreadReducer),
   __reducerSchema("register", RegisterReducer),
   __reducerSchema("remove_avatar", RemoveAvatarReducer),
+  __reducerSchema("remove_reaction", RemoveReactionReducer),
   __reducerSchema("send_audio_frame", SendAudioFrameReducer),
   __reducerSchema("send_channel_message", SendChannelMessageReducer),
   __reducerSchema("send_dm_audio_frame", SendDmAudioFrameReducer),

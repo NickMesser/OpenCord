@@ -164,6 +164,15 @@ export const MemberRole = __t.enum("MemberRole", {
 });
 export type MemberRole = __Infer<typeof MemberRole>;
 
+export const MessageReaction = __t.object("MessageReaction", {
+  id: __t.u64(),
+  messageId: __t.u64(),
+  userId: __t.u64(),
+  emoji: __t.string(),
+  createdAt: __t.timestamp(),
+});
+export type MessageReaction = __Infer<typeof MessageReaction>;
+
 export const Server = __t.object("Server", {
   id: __t.u64(),
   name: __t.string(),

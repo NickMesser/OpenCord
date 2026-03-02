@@ -7,7 +7,8 @@
   import {
     currentUser, channelsStore, channelMessagesStore, userAccountsStore,
     serverMembersStore, userSessionsStore, idEq, sendChannelMessage, deleteMessage, openDmThread, dmThreadsStore,
-    voiceMembersStore, channelMediaSettingsStore, setChannelMediaSettings
+    voiceMembersStore, channelMediaSettingsStore, setChannelMediaSettings,
+    messageReactionsStore, addReaction, removeReaction
   } from '$lib/stdb';
   import {
     joinVoice, leaveVoice, setVideoEnabled, setScreenShareEnabled,
@@ -17,6 +18,8 @@
   import { mobileNavOpen, mobileMembersOpen } from '$lib/mobile-nav';
   import MessageContent from '$lib/components/MessageContent.svelte';
   import UserAvatar from '$lib/components/UserAvatar.svelte';
+  import ContextMenu from '$lib/components/ContextMenu.svelte';
+  import EmojiPicker from '$lib/components/EmojiPicker.svelte';
 
   let messageText = $state('');
   let messagesEl: HTMLDivElement | null = $state(null);
@@ -323,6 +326,127 @@
     }
   });
 
+  // Context menu state
+  let ctxMenu = $state({ visible: false, x: 0, y: 0, items: [] as any[] });
+  let emojiPicker = $state({ visible: false, x: 0, y: 0, messageId: null as any });
+
+  function closeContextMenu() {
+    ctxMenu = { visible: false, x: 0, y: 0, items: [] };
+  }
+  function closeEmojiPicker() {
+    emojiPicker = { visible: false, x: 0, y: 0, messageId: null };
+  }
+
+  function handleMessageContext(e: MouseEvent, msg: any) {
+    e.preventDefault();
+    closeEmojiPicker();
+    const sender = getUser(msg.senderId ?? msg.sender_id);
+    const isOwn = $currentUser && idEq(msg.senderId ?? msg.sender_id, $currentUser.id);
+    const items: any[] = [
+      {
+        label: 'Add Reaction',
+        icon: '😀',
+        action: () => {
+          emojiPicker = { visible: true, x: e.clientX, y: e.clientY, messageId: msg.id };
+        }
+      },
+      {
+        label: 'Copy Message',
+        icon: '📋',
+        action: () => {
+          navigator.clipboard.writeText(msg.content ?? '').catch(() => {});
+        }
+      },
+    ];
+    if (sender && $currentUser && !idEq(sender.id, $currentUser.id)) {
+      items.push({
+        label: `Message ${sender.displayName ?? sender.display_name ?? sender.username ?? 'User'}`,
+        icon: '💬',
+        action: () => handleStartDm(sender.id),
+      });
+    }
+    if (isOwn || isAdmin) {
+      items.push(
+        { separator: true, label: '', action: () => {} },
+        {
+          label: 'Delete Message',
+          icon: '🗑️',
+          danger: true,
+          action: () => handleDelete(msg.id),
+        }
+      );
+    }
+    ctxMenu = { visible: true, x: e.clientX, y: e.clientY, items };
+  }
+
+  function handleUserContext(e: MouseEvent, user: any) {
+    e.preventDefault();
+    closeEmojiPicker();
+    if (!user) return;
+    const items: any[] = [];
+    if ($currentUser && !idEq(user.id, $currentUser.id)) {
+      items.push({
+        label: `Message ${user.displayName ?? user.display_name ?? user.username ?? 'User'}`,
+        icon: '💬',
+        action: () => handleStartDm(user.id),
+      });
+    }
+    items.push({
+      label: 'Copy Username',
+      icon: '📋',
+      action: () => {
+        navigator.clipboard.writeText(user.username ?? '').catch(() => {});
+      }
+    });
+    if (items.length === 0) return;
+    ctxMenu = { visible: true, x: e.clientX, y: e.clientY, items };
+  }
+
+  async function handleEmojiSelect(emoji: string) {
+    if (!emojiPicker.messageId) return;
+    const msgId = BigInt(emojiPicker.messageId?.toString?.() ?? '0');
+    try {
+      await addReaction(msgId, emoji);
+    } catch (e) { console.error(e); }
+  }
+
+  async function handleToggleReaction(msgId: any, emoji: string) {
+    const id = BigInt(msgId?.toString?.() ?? '0');
+    const myId = $currentUser?.id;
+    if (!myId) return;
+    const existing = ($messageReactionsStore ?? []).find(
+      (r: any) => idEq(r.messageId ?? r.message_id, id) && idEq(r.userId ?? r.user_id, myId) && (r.emoji === emoji)
+    );
+    try {
+      if (existing) {
+        await removeReaction(id, emoji);
+      } else {
+        await addReaction(id, emoji);
+      }
+    } catch (e) { console.error(e); }
+  }
+
+  function getReactionsForMessage(msgId: any) {
+    const id = BigInt(msgId?.toString?.() ?? '0');
+    const reactions = ($messageReactionsStore ?? []).filter(
+      (r: any) => idEq(r.messageId ?? r.message_id, id)
+    );
+    const grouped = new Map<string, { emoji: string; count: number; userIds: Set<string> }>();
+    for (const r of reactions) {
+      const e = r.emoji;
+      if (!grouped.has(e)) grouped.set(e, { emoji: e, count: 0, userIds: new Set() });
+      const g = grouped.get(e)!;
+      g.count++;
+      g.userIds.add((r.userId ?? r.user_id)?.toString?.() ?? '');
+    }
+    return Array.from(grouped.values());
+  }
+
+  function hasMyReaction(group: { emoji: string; userIds: Set<string> }) {
+    const myId = $currentUser?.id?.toString?.() ?? '';
+    return myId && group.userIds.has(myId);
+  }
+
   let membersByRole = $derived((() => {
     const groups: Record<string, any[]> = { Owner: [], Admin: [], Member: [] };
     for (const m of serverMembers) {
@@ -345,7 +469,11 @@
         </h4>
         {#each members as m (m.id?.toString?.())}
           {@const status = getUserStatus(m.user?.id ?? m.userId ?? m.user_id)}
-          <div class="flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-[#1b2230]/50 transition-colors">
+          <!-- svelte-ignore a11y_no_static_element_interactions -->
+          <div
+            class="flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-[#1b2230]/50 transition-colors"
+            oncontextmenu={(e) => handleUserContext(e, m.user)}
+          >
             <div class="relative flex-shrink-0">
               <UserAvatar user={m.user} size="sm" />
               <span
@@ -647,14 +775,23 @@
         {@const sameSender = prevMsg && idEq(prevMsg.senderId ?? prevMsg.sender_id, msg.senderId ?? msg.sender_id)}
         {@const isOwn = $currentUser && idEq(msg.senderId ?? msg.sender_id, $currentUser.id)}
 
+        {@const reactions = getReactionsForMessage(msg.id)}
         {#if !sameSender}
-          <div class="flex items-start gap-3 pt-3 group hover:bg-[#1b2230]/30 px-2 -mx-2 rounded-md">
-            <div class="mt-0.5">
+          <!-- svelte-ignore a11y_no_static_element_interactions -->
+          <div
+            class="flex items-start gap-3 pt-3 group hover:bg-[#1b2230]/30 px-2 -mx-2 rounded-md"
+            oncontextmenu={(e) => handleMessageContext(e, msg)}
+          >
+            <div class="mt-0.5" oncontextmenu={(e) => { e.stopPropagation(); handleUserContext(e, sender); }}>
               <UserAvatar user={sender} size="md" />
             </div>
             <div class="min-w-0 flex-1">
               <div class="flex items-baseline gap-2 flex-wrap">
-                <span class="font-semibold text-[#e9eefc] text-sm">{sender?.displayName ?? sender?.display_name ?? sender?.username ?? 'Unknown'}</span>
+                <!-- svelte-ignore a11y_no_static_element_interactions -->
+                <span
+                  class="font-semibold text-[#e9eefc] text-sm cursor-pointer hover:underline"
+                  oncontextmenu={(e) => { e.stopPropagation(); handleUserContext(e, sender); }}
+                >{sender?.displayName ?? sender?.display_name ?? sender?.username ?? 'Unknown'}</span>
                 <span class="text-xs text-[#8b95a8]">{formatTime(msg.sentAt ?? msg.sent_at)}</span>
                 {#if isOwn}
                   <button
@@ -666,20 +803,54 @@
                 {/if}
               </div>
               <MessageContent text={msg.content} />
+              {#if reactions.length > 0}
+                <div class="flex flex-wrap gap-1 mt-1">
+                  {#each reactions as rg (rg.emoji)}
+                    <button
+                      onclick={() => handleToggleReaction(msg.id, rg.emoji)}
+                      class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-xs border transition-colors
+                        {hasMyReaction(rg) ? 'bg-[#5865f2]/20 border-[#5865f2]/50 text-[#e9eefc]' : 'bg-[#1b2230]/50 border-[#1b2230] text-[#8b95a8] hover:border-[#5865f2]/30'}"
+                    >
+                      <span class="text-sm">{rg.emoji}</span>
+                      <span>{rg.count}</span>
+                    </button>
+                  {/each}
+                </div>
+              {/if}
             </div>
           </div>
         {:else}
-          <div class="flex items-start gap-3 group hover:bg-[#1b2230]/30 px-2 -mx-2 rounded-md">
+          <!-- svelte-ignore a11y_no_static_element_interactions -->
+          <div
+            class="flex items-start gap-3 group hover:bg-[#1b2230]/30 px-2 -mx-2 rounded-md"
+            oncontextmenu={(e) => handleMessageContext(e, msg)}
+          >
             <div class="w-8 md:w-10 flex-shrink-0"></div>
-            <div class="min-w-0 flex-1 flex items-start gap-2">
-              <div class="flex-1"><MessageContent text={msg.content} /></div>
-              {#if isOwn}
-                <button
-                  onclick={() => handleDelete(msg.id)}
-                  class="md:opacity-0 md:group-hover:opacity-100 text-xs text-red-400 hover:text-red-300 flex-shrink-0 transition-opacity"
-                >
-                  Delete
-                </button>
+            <div class="min-w-0 flex-1">
+              <div class="flex items-start gap-2">
+                <div class="flex-1"><MessageContent text={msg.content} /></div>
+                {#if isOwn}
+                  <button
+                    onclick={() => handleDelete(msg.id)}
+                    class="md:opacity-0 md:group-hover:opacity-100 text-xs text-red-400 hover:text-red-300 flex-shrink-0 transition-opacity"
+                  >
+                    Delete
+                  </button>
+                {/if}
+              </div>
+              {#if reactions.length > 0}
+                <div class="flex flex-wrap gap-1 mt-1">
+                  {#each reactions as rg (rg.emoji)}
+                    <button
+                      onclick={() => handleToggleReaction(msg.id, rg.emoji)}
+                      class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-xs border transition-colors
+                        {hasMyReaction(rg) ? 'bg-[#5865f2]/20 border-[#5865f2]/50 text-[#e9eefc]' : 'bg-[#1b2230]/50 border-[#1b2230] text-[#8b95a8] hover:border-[#5865f2]/30'}"
+                    >
+                      <span class="text-sm">{rg.emoji}</span>
+                      <span>{rg.count}</span>
+                    </button>
+                  {/each}
+                </div>
               {/if}
             </div>
           </div>
@@ -733,3 +904,19 @@
     {@render memberListContent()}
   </div>
 {/if}
+
+<ContextMenu
+  x={ctxMenu.x}
+  y={ctxMenu.y}
+  items={ctxMenu.items}
+  visible={ctxMenu.visible}
+  onclose={closeContextMenu}
+/>
+
+<EmojiPicker
+  x={emojiPicker.x}
+  y={emojiPicker.y}
+  visible={emojiPicker.visible}
+  onselect={handleEmojiSelect}
+  onclose={closeEmojiPicker}
+/>
