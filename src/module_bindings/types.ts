@@ -231,6 +231,10 @@ export const VoiceMember = __t.object("VoiceMember", {
   userId: __t.u64(),
   identity: __t.identity(),
   joinedAt: __t.timestamp(),
+  muted: __t.bool(),
+  deafened: __t.bool(),
+  videoOn: __t.bool(),
+  screenSharing: __t.bool(),
 });
 export type VoiceMember = __Infer<typeof VoiceMember>;
 

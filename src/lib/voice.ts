@@ -11,6 +11,7 @@ import {
   sendDmAudioFrame,
   sendDmVideoFrame,
   sendVideoFrame,
+  updateVoiceState,
   idEq
 } from '$lib/stdb';
 
@@ -107,6 +108,9 @@ let videoTimer: number | null = null;
 let screenStream: MediaStream | null = null;
 let screenTimer: number | null = null;
 let videoUrlMap = new Map<string, string>();
+let videoDelta = createDeltaEncoder();
+let screenDelta = createDeltaEncoder();
+const videoReconMap = new Map<string, ReconState>();
 let inputGainValue = 1;
 let outputGainValue = 1;
 let isMuted = false;
@@ -150,6 +154,154 @@ function identityHex(id: any): string {
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
+}
+
+const MULAW_BIAS = 33;
+const MULAW_MAX = 0x1FFF;
+
+function encodeMuLawSample(sample: number): number {
+  const sign = (sample >> 8) & 0x80;
+  if (sign !== 0) sample = -sample;
+  if (sample > MULAW_MAX) sample = MULAW_MAX;
+  sample += MULAW_BIAS;
+  let exponent = 7;
+  for (let mask = 0x4000; (sample & mask) === 0 && exponent > 0; exponent--, mask >>= 1);
+  return (~(sign | (exponent << 4) | ((sample >> (exponent + 3)) & 0x0f))) & 0xff;
+}
+
+function decodeMuLawSample(byte: number): number {
+  byte = ~byte;
+  const sign = byte & 0x80;
+  const exponent = (byte >> 4) & 0x07;
+  const mantissa = byte & 0x0f;
+  let sample = ((mantissa << 3) + 0x84) << exponent;
+  sample -= 0x84;
+  return sign !== 0 ? -sample : sample;
+}
+
+function pcm16ToMuLaw(pcm: Int16Array): Uint8Array {
+  const out = new Uint8Array(pcm.length);
+  for (let i = 0; i < pcm.length; i++) out[i] = encodeMuLawSample(pcm[i]);
+  return out;
+}
+
+function muLawToPcm16(mulaw: Uint8Array): Int16Array {
+  const out = new Int16Array(mulaw.length);
+  for (let i = 0; i < mulaw.length; i++) out[i] = decodeMuLawSample(mulaw[i]);
+  return out;
+}
+
+const KEYFRAME_INTERVAL = 15;
+const KEYFRAME_QUALITY = 0.80;
+const DELTA_QUALITY = 0.50;
+
+type DeltaEncoderState = { prevData: ImageData | null; frameNum: number };
+type ReconState = { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D; hasKey: boolean };
+
+function createDeltaEncoder(): DeltaEncoderState {
+  return { prevData: null, frameNum: 0 };
+}
+
+function encodeDeltaFrame(
+  ctx: CanvasRenderingContext2D,
+  canvas: HTMLCanvasElement,
+  state: DeltaEncoderState,
+  maxBytes: number,
+  callback: (payload: Uint8Array) => void,
+): void {
+  const w = canvas.width;
+  const h = canvas.height;
+  const currentData = ctx.getImageData(0, 0, w, h);
+  const isKey = !state.prevData || state.frameNum % KEYFRAME_INTERVAL === 0;
+
+  if (!isKey && state.prevData) {
+    const curr = currentData.data;
+    const prev = state.prevData.data;
+    const delta = ctx.createImageData(w, h);
+    const d = delta.data;
+    for (let i = 0; i < curr.length; i += 4) {
+      d[i]     = (curr[i]     - prev[i]     + 128) & 0xff;
+      d[i + 1] = (curr[i + 1] - prev[i + 1] + 128) & 0xff;
+      d[i + 2] = (curr[i + 2] - prev[i + 2] + 128) & 0xff;
+      d[i + 3] = 255;
+    }
+    ctx.putImageData(delta, 0, 0);
+  }
+
+  state.prevData = currentData;
+  state.frameNum++;
+
+  canvas.toBlob((blob) => {
+    if (!blob) return;
+    blob.arrayBuffer().then((buf) => {
+      const img = new Uint8Array(buf);
+      const payload = new Uint8Array(img.length + 1);
+      payload[0] = isKey ? 0 : 1;
+      payload.set(img, 1);
+      if (payload.byteLength <= maxBytes) callback(payload);
+    }).catch(() => undefined);
+  }, 'image/webp', isKey ? KEYFRAME_QUALITY : DELTA_QUALITY);
+}
+
+function getReconState(map: Map<string, ReconState>, key: string): ReconState {
+  let s = map.get(key);
+  if (!s) {
+    const canvas = document.createElement('canvas');
+    s = { canvas, ctx: canvas.getContext('2d')!, hasKey: false };
+    map.set(key, s);
+  }
+  return s;
+}
+
+async function decodeDeltaFrame(
+  reconMap: Map<string, ReconState>,
+  idHex: string,
+  payload: Uint8Array,
+): Promise<string> {
+  const isKey = payload[0] === 0;
+  const imageBytes = payload.subarray(1);
+
+  const blob = new Blob([imageBytes], { type: 'image/webp' });
+  const bitmap = await createImageBitmap(blob);
+  const w = bitmap.width;
+  const h = bitmap.height;
+
+  const state = getReconState(reconMap, idHex);
+  if (state.canvas.width !== w || state.canvas.height !== h) {
+    state.canvas.width = w;
+    state.canvas.height = h;
+    state.hasKey = false;
+  }
+
+  if (isKey) {
+    state.ctx.drawImage(bitmap, 0, 0);
+    state.hasKey = true;
+  } else if (state.hasKey) {
+    const prev = state.ctx.getImageData(0, 0, w, h);
+    state.ctx.drawImage(bitmap, 0, 0);
+    const delta = state.ctx.getImageData(0, 0, w, h);
+    const pd = prev.data;
+    const dd = delta.data;
+    for (let i = 0; i < pd.length; i += 4) {
+      pd[i]     = (dd[i]     - 128 + pd[i]) & 0xff;
+      pd[i + 1] = (dd[i + 1] - 128 + pd[i + 1]) & 0xff;
+      pd[i + 2] = (dd[i + 2] - 128 + pd[i + 2]) & 0xff;
+    }
+    state.ctx.putImageData(prev, 0, 0);
+  } else {
+    bitmap.close();
+    throw new Error('No keyframe yet');
+  }
+
+  bitmap.close();
+
+  return new Promise<string>((resolve, reject) => {
+    state.canvas.toBlob(
+      (b) => (b ? resolve(URL.createObjectURL(b)) : reject(new Error('export failed'))),
+      'image/webp',
+      0.95,
+    );
+  });
 }
 
 function ensureSfxContext(): AudioContext | null {
@@ -210,6 +362,18 @@ function playSfx(kind: 'join' | 'leave' | 'mute' | 'unmute' | 'deafen' | 'undeaf
   }
 }
 
+function syncVoiceStateToDB() {
+  if (!activeChannelId) return;
+  const vs = get(voiceState);
+  updateVoiceState({
+    channelId: activeChannelId,
+    muted: isMuted,
+    deafened: isDeafened,
+    videoOn: vs.videoEnabled,
+    screenSharing: vs.screenSharing,
+  }).catch(() => undefined);
+}
+
 function ensureEventHandlers() {
   if (handlersAttached) return;
   handlersAttached = true;
@@ -233,12 +397,12 @@ function handleAudioFrame(row: any) {
   const idHex = identityHex(row.from);
   updateAudioLevel(idHex, Number(row.rms ?? 0));
 
-  const pcm: Uint8Array = row.pcm16le ?? row.pcm16 ?? row.bytes ?? new Uint8Array();
-  if (!pcm || pcm.byteLength === 0) return;
+  const encoded: Uint8Array = row.pcm16le ?? row.pcm16 ?? row.bytes ?? new Uint8Array();
+  if (!encoded || encoded.byteLength === 0) return;
 
   const channels = Number(row.channels ?? 1);
   const sampleRate = Number(row.sampleRate ?? row.sample_rate ?? defaultSettings.audioTargetSampleRate);
-  const int16 = new Int16Array(pcm.buffer, pcm.byteOffset, Math.floor(pcm.byteLength / 2));
+  const int16 = muLawToPcm16(encoded);
   const frameLength = Math.floor(int16.length / channels);
   if (frameLength <= 0) return;
 
@@ -281,15 +445,15 @@ function handleVideoFrame(row: any) {
   if (me && identityHex(row.from) === identityHex(me)) return;
 
   const idHex = identityHex(row.from);
-  const jpeg: Uint8Array = row.jpeg ?? row.bytes ?? new Uint8Array();
-  if (!jpeg || jpeg.byteLength === 0) return;
+  const payload: Uint8Array = row.jpeg ?? row.bytes ?? new Uint8Array();
+  if (!payload || payload.byteLength < 2) return;
 
-  const blob = new Blob([jpeg as unknown as BlobPart], { type: 'image/jpeg' });
-  const url = URL.createObjectURL(blob);
-  const prev = videoUrlMap.get(idHex);
-  if (prev) URL.revokeObjectURL(prev);
-  videoUrlMap.set(idHex, url);
-  remoteVideoFramesStore.update((frames) => ({ ...frames, [idHex]: url }));
+  decodeDeltaFrame(videoReconMap, idHex, payload).then((url) => {
+    const prev = videoUrlMap.get(idHex);
+    if (prev) URL.revokeObjectURL(prev);
+    videoUrlMap.set(idHex, url);
+    remoteVideoFramesStore.update((frames) => ({ ...frames, [idHex]: url }));
+  }).catch(() => undefined);
 }
 
 async function startAudioCapture(settings: ChannelSettings) {
@@ -335,7 +499,7 @@ async function startAudioCapture(settings: ChannelSettings) {
       const rms = Math.sqrt(sum / frame.length);
       const me = get(identityStore);
       if (me) updateAudioLevel(identityHex(me), rms);
-      const bytes = new Uint8Array(pcm.buffer);
+      const bytes = pcm16ToMuLaw(pcm);
       if (bytes.byteLength > settings.audioMaxFrameBytes) continue;
 
       sendAudioFrame({
@@ -392,26 +556,21 @@ async function startVideoCapture(settings: ChannelSettings) {
   const ctx = canvas.getContext('2d');
   if (!ctx) return;
 
+  videoDelta = createDeltaEncoder();
   const intervalMs = Math.max(100, Math.floor(1000 / settings.videoFps));
   videoTimer = window.setInterval(() => {
     if (!activeChannelId || !videoStream) return;
     ctx.drawImage(videoEl, 0, 0, canvas.width, canvas.height);
-    canvas.toBlob((blob) => {
-      if (!blob || !activeChannelId) return;
-      blob.arrayBuffer().then((buf) => {
-        const bytes = new Uint8Array(buf);
-        if (bytes.byteLength > settings.videoMaxFrameBytes) return;
-        const targetChannelId = activeChannelId;
-        if (!targetChannelId) return;
-        sendVideoFrame({
-          channelId: targetChannelId,
-          seq: seq++,
-          width: settings.videoWidth,
-          height: settings.videoHeight,
-          jpeg: bytes,
-        }).catch(() => undefined);
+    encodeDeltaFrame(ctx, canvas, videoDelta, settings.videoMaxFrameBytes, (payload) => {
+      if (!activeChannelId) return;
+      sendVideoFrame({
+        channelId: activeChannelId,
+        seq: seq++,
+        width: settings.videoWidth,
+        height: settings.videoHeight,
+        jpeg: payload,
       }).catch(() => undefined);
-    }, 'image/jpeg', settings.videoJpegQuality);
+    });
   }, intervalMs);
 }
 
@@ -420,6 +579,7 @@ function stopVideoCapture() {
   if (videoStream) videoStream.getTracks().forEach((t) => t.stop());
   videoTimer = null;
   videoStream = null;
+  videoDelta = createDeltaEncoder();
   localVideoStreamStore.set(null);
 }
 
@@ -455,26 +615,21 @@ async function startScreenShare(settings: ChannelSettings, quality: ScreenShareQ
   const ctx = canvas.getContext('2d');
   if (!ctx) return;
 
+  screenDelta = createDeltaEncoder();
   const intervalMs = Math.max(100, Math.floor(1000 / preset.fps));
   screenTimer = window.setInterval(() => {
     if (!activeChannelId || !screenStream) return;
     ctx.drawImage(videoEl, 0, 0, canvas.width, canvas.height);
-    canvas.toBlob((blob) => {
-      if (!blob || !activeChannelId) return;
-      blob.arrayBuffer().then((buf) => {
-        const bytes = new Uint8Array(buf);
-        if (bytes.byteLength > preset.maxFrameBytes) return;
-        const targetChannelId = activeChannelId;
-        if (!targetChannelId) return;
-        sendVideoFrame({
-          channelId: targetChannelId,
-          seq: seq++,
-          width: preset.width,
-          height: preset.height,
-          jpeg: bytes,
-        }).catch(() => undefined);
+    encodeDeltaFrame(ctx, canvas, screenDelta, preset.maxFrameBytes, (payload) => {
+      if (!activeChannelId) return;
+      sendVideoFrame({
+        channelId: activeChannelId,
+        seq: seq++,
+        width: preset.width,
+        height: preset.height,
+        jpeg: payload,
       }).catch(() => undefined);
-    }, 'image/jpeg', preset.jpegQuality);
+    });
   }, intervalMs);
 }
 
@@ -483,6 +638,7 @@ function stopScreenShare() {
   if (screenStream) screenStream.getTracks().forEach((t) => t.stop());
   screenTimer = null;
   screenStream = null;
+  screenDelta = createDeltaEncoder();
   localVideoStreamStore.set(videoStream ?? null);
   voiceState.update((s) => ({ ...s, screenSharing: false }));
 }
@@ -516,6 +672,7 @@ export async function joinVoice(channelId: bigint, opts: { video?: boolean } = {
       videoEnabled: opts.video ?? false,
       screenSharing: false,
     });
+    syncVoiceStateToDB();
   } catch (e: any) {
     voiceState.update((s) => ({
       ...s,
@@ -544,6 +701,7 @@ export async function leaveVoice() {
   remoteVideoFramesStore.set({});
   for (const url of videoUrlMap.values()) URL.revokeObjectURL(url);
   videoUrlMap.clear();
+  videoReconMap.clear();
   if (channelId) {
     await leaveVoiceChannel(channelId);
   }
@@ -561,6 +719,7 @@ export async function setVideoEnabled(enable: boolean) {
     stopVideoCapture();
   }
   voiceState.update((s) => ({ ...s, videoEnabled: enable }));
+  syncVoiceStateToDB();
 }
 
 export async function setScreenShareEnabled(enable: boolean, quality: ScreenShareQuality = 'medium') {
@@ -583,6 +742,7 @@ export async function setScreenShareEnabled(enable: boolean, quality: ScreenShar
   } else {
     stopScreenShare();
   }
+  syncVoiceStateToDB();
 }
 
 export function setInputGain(value: number) {
@@ -601,12 +761,14 @@ export function toggleMute() {
   isMuted = !isMuted;
   playSfx(isMuted ? 'mute' : 'unmute');
   audioControlStore.update((s) => ({ ...s, muted: isMuted }));
+  syncVoiceStateToDB();
 }
 
 export function toggleDeafen() {
   isDeafened = !isDeafened;
   playSfx(isDeafened ? 'deafen' : 'undeafen');
   audioControlStore.update((s) => ({ ...s, deafened: isDeafened }));
+  syncVoiceStateToDB();
 }
 
 let dmHandlersAttached = false;
@@ -624,6 +786,9 @@ let dmVideoTimer: number | null = null;
 let dmScreenStream: MediaStream | null = null;
 let dmScreenTimer: number | null = null;
 let dmVideoUrlMap = new Map<string, string>();
+let dmVideoDelta = createDeltaEncoder();
+let dmScreenDelta = createDeltaEncoder();
+const dmVideoReconMap = new Map<string, ReconState>();
 
 function ensureDmEventHandlers() {
   if (dmHandlersAttached) return;
@@ -644,11 +809,11 @@ function handleDmAudioFrame(row: any) {
     [idHex]: { rms: Number(row.rms ?? 0), at: Date.now() },
   }));
 
-  const pcm: Uint8Array = row.pcm16le ?? new Uint8Array();
-  if (!pcm || pcm.byteLength === 0) return;
+  const encoded: Uint8Array = row.pcm16le ?? new Uint8Array();
+  if (!encoded || encoded.byteLength === 0) return;
   const channels = Number(row.channels ?? 1);
   const sampleRate = Number(row.sampleRate ?? row.sample_rate ?? 16000);
-  const int16 = new Int16Array(pcm.buffer, pcm.byteOffset, Math.floor(pcm.byteLength / 2));
+  const int16 = muLawToPcm16(encoded);
   const frameLength = Math.floor(int16.length / channels);
   if (frameLength <= 0) return;
 
@@ -687,14 +852,15 @@ function handleDmVideoFrame(row: any) {
   const me = get(identityStore);
   if (me && identityHex(row.from) === identityHex(me)) return;
   const idHex = identityHex(row.from);
-  const jpeg: Uint8Array = row.jpeg ?? new Uint8Array();
-  if (!jpeg || jpeg.byteLength === 0) return;
-  const blob = new Blob([jpeg as unknown as BlobPart], { type: 'image/jpeg' });
-  const url = URL.createObjectURL(blob);
-  const prev = dmVideoUrlMap.get(idHex);
-  if (prev) URL.revokeObjectURL(prev);
-  dmVideoUrlMap.set(idHex, url);
-  dmRemoteVideoFramesStore.update((frames) => ({ ...frames, [idHex]: url }));
+  const payload: Uint8Array = row.jpeg ?? new Uint8Array();
+  if (!payload || payload.byteLength < 2) return;
+
+  decodeDeltaFrame(dmVideoReconMap, idHex, payload).then((url) => {
+    const prev = dmVideoUrlMap.get(idHex);
+    if (prev) URL.revokeObjectURL(prev);
+    dmVideoUrlMap.set(idHex, url);
+    dmRemoteVideoFramesStore.update((frames) => ({ ...frames, [idHex]: url }));
+  }).catch(() => undefined);
 }
 
 async function startDmAudioCapture(sampleRate = 16000, frameMs = 50) {
@@ -741,7 +907,7 @@ async function startDmAudioCapture(sampleRate = 16000, frameMs = 50) {
         sampleRate,
         channels: 1,
         rms,
-        pcm16le: new Uint8Array(pcm.buffer),
+        pcm16le: pcm16ToMuLaw(pcm),
       }).catch(() => undefined);
     }
   };
@@ -777,26 +943,21 @@ async function startDmVideoCapture(width = 320, height = 180, fps = 8, quality =
   canvas.height = height;
   const ctx = canvas.getContext('2d');
   if (!ctx) return;
+  dmVideoDelta = createDeltaEncoder();
   const intervalMs = Math.max(100, Math.floor(1000 / fps));
   dmVideoTimer = window.setInterval(() => {
     if (!dmActiveThreadId || !dmVideoStream) return;
     ctx.drawImage(videoEl, 0, 0, canvas.width, canvas.height);
-    canvas.toBlob((blob) => {
-      if (!blob || !dmActiveThreadId) return;
-      blob.arrayBuffer().then((buf) => {
-        const bytes = new Uint8Array(buf);
-        if (bytes.byteLength > maxBytes) return;
-        const targetThreadId = dmActiveThreadId;
-        if (!targetThreadId) return;
-        sendDmVideoFrame({
-          threadId: targetThreadId,
-          seq: dmSeq++,
-          width,
-          height,
-          jpeg: bytes,
-        }).catch(() => undefined);
+    encodeDeltaFrame(ctx, canvas, dmVideoDelta, maxBytes, (payload) => {
+      if (!dmActiveThreadId) return;
+      sendDmVideoFrame({
+        threadId: dmActiveThreadId,
+        seq: dmSeq++,
+        width,
+        height,
+        jpeg: payload,
       }).catch(() => undefined);
-    }, 'image/jpeg', quality);
+    });
   }, intervalMs);
 }
 
@@ -805,6 +966,7 @@ function stopDmVideoCapture() {
   if (dmVideoStream) dmVideoStream.getTracks().forEach((t) => t.stop());
   dmVideoTimer = null;
   dmVideoStream = null;
+  dmVideoDelta = createDeltaEncoder();
   dmLocalVideoStreamStore.set(null);
 }
 
@@ -832,26 +994,21 @@ async function startDmScreenShare(quality: ScreenShareQuality = 'medium') {
   canvas.height = preset.height;
   const ctx = canvas.getContext('2d');
   if (!ctx) return;
+  dmScreenDelta = createDeltaEncoder();
   const intervalMs = Math.max(100, Math.floor(1000 / preset.fps));
   dmScreenTimer = window.setInterval(() => {
     if (!dmActiveThreadId || !dmScreenStream) return;
     ctx.drawImage(videoEl, 0, 0, canvas.width, canvas.height);
-    canvas.toBlob((blob) => {
-      if (!blob || !dmActiveThreadId) return;
-      blob.arrayBuffer().then((buf) => {
-        const bytes = new Uint8Array(buf);
-        if (bytes.byteLength > preset.maxFrameBytes) return;
-        const targetThreadId = dmActiveThreadId;
-        if (!targetThreadId) return;
-        sendDmVideoFrame({
-          threadId: targetThreadId,
-          seq: dmSeq++,
-          width: preset.width,
-          height: preset.height,
-          jpeg: bytes,
-        }).catch(() => undefined);
+    encodeDeltaFrame(ctx, canvas, dmScreenDelta, preset.maxFrameBytes, (payload) => {
+      if (!dmActiveThreadId) return;
+      sendDmVideoFrame({
+        threadId: dmActiveThreadId,
+        seq: dmSeq++,
+        width: preset.width,
+        height: preset.height,
+        jpeg: payload,
       }).catch(() => undefined);
-    }, 'image/jpeg', preset.jpegQuality);
+    });
   }, intervalMs);
 }
 
@@ -860,6 +1017,7 @@ function stopDmScreenShare() {
   if (dmScreenStream) dmScreenStream.getTracks().forEach((t) => t.stop());
   dmScreenTimer = null;
   dmScreenStream = null;
+  dmScreenDelta = createDeltaEncoder();
   dmLocalVideoStreamStore.set(dmVideoStream ?? null);
   dmCallState.update((s) => ({ ...s, screenSharing: false }));
 }
@@ -908,6 +1066,7 @@ export async function leaveDmVoice() {
   dmRemoteVideoFramesStore.set({});
   for (const url of dmVideoUrlMap.values()) URL.revokeObjectURL(url);
   dmVideoUrlMap.clear();
+  dmVideoReconMap.clear();
   if (threadId) await leaveDmCall(threadId);
   playSfx('leave');
 }

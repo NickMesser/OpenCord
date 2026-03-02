@@ -157,6 +157,14 @@ pub struct VoiceMember {
     pub user_id: u64,
     pub identity: Identity,
     pub joined_at: Timestamp,
+    #[default(false)]
+    pub muted: bool,
+    #[default(false)]
+    pub deafened: bool,
+    #[default(false)]
+    pub video_on: bool,
+    #[default(false)]
+    pub screen_sharing: bool,
 }
 
 #[spacetimedb::table(accessor = channel_media_settings, public)]
@@ -1130,6 +1138,10 @@ pub fn join_voice_channel(ctx: &ReducerContext, channel_id: u64) -> Result<(), S
         user_id: caller.id,
         identity: ctx.sender(),
         joined_at: ctx.timestamp,
+        muted: false,
+        deafened: false,
+        video_on: false,
+        screen_sharing: false,
     });
     Ok(())
 }
@@ -1143,6 +1155,57 @@ pub fn leave_voice_channel(ctx: &ReducerContext, channel_id: u64) -> Result<(), 
     for id in ids {
         ctx.db.voice_member().id().delete(&id);
     }
+    Ok(())
+}
+
+#[spacetimedb::reducer]
+pub fn kick_from_voice(ctx: &ReducerContext, channel_id: u64, target_user_id: u64) -> Result<(), String> {
+    let ch = ctx.db.channel().id().find(&channel_id)
+        .ok_or("Channel not found")?;
+    require_admin(ctx, ch.server_id)?;
+
+    let caller = get_caller(ctx)?;
+    if caller.id == target_user_id {
+        return Err("Cannot kick yourself".to_string());
+    }
+
+    let ids: Vec<u64> = ctx.db.voice_member().iter()
+        .filter(|v| v.user_id == target_user_id && v.channel_id == channel_id)
+        .map(|v| v.id)
+        .collect();
+    if ids.is_empty() {
+        return Err("User is not in this voice channel".to_string());
+    }
+    for id in ids {
+        ctx.db.voice_member().id().delete(&id);
+    }
+    Ok(())
+}
+
+#[spacetimedb::reducer]
+pub fn update_voice_state(
+    ctx: &ReducerContext,
+    channel_id: u64,
+    muted: bool,
+    deafened: bool,
+    video_on: bool,
+    screen_sharing: bool,
+) -> Result<(), String> {
+    let who = ctx.sender();
+    let member = ctx
+        .db
+        .voice_member()
+        .iter()
+        .find(|v| v.identity == who && v.channel_id == channel_id)
+        .ok_or("Not in this voice channel")?;
+
+    ctx.db.voice_member().id().update(VoiceMember {
+        muted,
+        deafened,
+        video_on,
+        screen_sharing,
+        ..member
+    });
     Ok(())
 }
 

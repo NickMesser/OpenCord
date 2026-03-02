@@ -48,6 +48,7 @@ import DeleteServerReducer from "./delete_server_reducer";
 import JoinDmCallReducer from "./join_dm_call_reducer";
 import JoinServerReducer from "./join_server_reducer";
 import JoinVoiceChannelReducer from "./join_voice_channel_reducer";
+import KickFromVoiceReducer from "./kick_from_voice_reducer";
 import LeaveDmCallReducer from "./leave_dm_call_reducer";
 import LeaveServerReducer from "./leave_server_reducer";
 import LeaveVoiceChannelReducer from "./leave_voice_channel_reducer";
@@ -69,6 +70,7 @@ import SetPublicEncryptionKeyReducer from "./set_public_encryption_key_reducer";
 import UpdateAvatarReducer from "./update_avatar_reducer";
 import UpdateBannerReducer from "./update_banner_reducer";
 import UpdateProfileReducer from "./update_profile_reducer";
+import UpdateVoiceStateReducer from "./update_voice_state_reducer";
 import UploadFileReducer from "./upload_file_reducer";
 
 // Import all procedure arg schemas
@@ -341,6 +343,7 @@ const reducersSchema = __reducers(
   __reducerSchema("join_dm_call", JoinDmCallReducer),
   __reducerSchema("join_server", JoinServerReducer),
   __reducerSchema("join_voice_channel", JoinVoiceChannelReducer),
+  __reducerSchema("kick_from_voice", KickFromVoiceReducer),
   __reducerSchema("leave_dm_call", LeaveDmCallReducer),
   __reducerSchema("leave_server", LeaveServerReducer),
   __reducerSchema("leave_voice_channel", LeaveVoiceChannelReducer),
@@ -362,6 +365,7 @@ const reducersSchema = __reducers(
   __reducerSchema("update_avatar", UpdateAvatarReducer),
   __reducerSchema("update_banner", UpdateBannerReducer),
   __reducerSchema("update_profile", UpdateProfileReducer),
+  __reducerSchema("update_voice_state", UpdateVoiceStateReducer),
   __reducerSchema("upload_file", UploadFileReducer),
 );
 

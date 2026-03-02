@@ -10,14 +10,10 @@ import {
   type Infer as __Infer,
 } from "spacetimedb";
 
-export default __t.row({
-  id: __t.u64().primaryKey(),
-  channelId: __t.u64().name("channel_id"),
-  userId: __t.u64().name("user_id"),
-  identity: __t.identity(),
-  joinedAt: __t.timestamp().name("joined_at"),
+export default {
+  channelId: __t.u64(),
   muted: __t.bool(),
   deafened: __t.bool(),
-  videoOn: __t.bool().name("video_on"),
-  screenSharing: __t.bool().name("screen_sharing"),
-});
+  videoOn: __t.bool(),
+  screenSharing: __t.bool(),
+};

@@ -4,10 +4,11 @@
   import { fly } from 'svelte/transition';
   import {
     currentUser, serversStore, serverMembersStore, categoriesStore,
-    channelsStore, inviteLinksStore, idEq,
-    createCategory, createChannel, createInvite, deleteServer, leaveServer
+    channelsStore, inviteLinksStore, voiceMembersStore, userAccountsStore,
+    fileUploadsStore, getFileDataUrl, idEq
   } from '$lib/stdb';
-  import { voiceState, audioControlStore, toggleMute, toggleDeafen, leaveVoice } from '$lib/voice';
+  import { createCategory, createChannel, createInvite, deleteServer, leaveServer } from '$lib/stdb';
+  import { voiceState, audioControlStore, audioLevelsStore, toggleMute, toggleDeafen, leaveVoice } from '$lib/voice';
   import { mobileNavOpen } from '$lib/mobile-nav';
 
   let { children } = $props();
@@ -122,6 +123,30 @@
     else next.add(catId);
     collapsedCategories = next;
   }
+
+  let audioTalkingRmsThreshold = 0.02;
+
+  function voiceMembersForChannel(channelId: any) {
+    return ($voiceMembersStore ?? []).filter(
+      (m: any) => idEq(m.channelId ?? m.channel_id, channelId)
+    );
+  }
+
+  function getUser(userId: any) {
+    return ($userAccountsStore ?? []).find((u: any) => idEq(u.id, userId)) ?? null;
+  }
+
+  function getUserAvatarUrl(user: any): string | null {
+    if (!user) return null;
+    return getFileDataUrl(user.avatarFileId ?? user.avatar_file_id, $fileUploadsStore ?? []);
+  }
+
+  function isSpeaking(member: any): boolean {
+    const hex = member.identity?.toHexString?.() ?? '';
+    if (!hex) return false;
+    const level = $audioLevelsStore?.[hex];
+    return !!level && level.rms >= audioTalkingRmsThreshold && (Date.now() - level.at) < 1500;
+  }
 </script>
 
 {#snippet channelSidebarContent()}
@@ -163,12 +188,14 @@
         {#if !collapsed}
           {#each channelsForCategory(cat.id) as ch (ch.id?.toString?.())}
             {@const isActive = activeChannelId === ch.id?.toString?.()}
+            {@const isVoice = channelTypeTag(ch) === 'voice'}
+            {@const vcMembers = isVoice ? voiceMembersForChannel(ch.id) : []}
             <a
               href="/channels/{serverId}/{ch.id}"
               class="flex items-center gap-2 px-2 py-1.5 mx-1 mt-0.5 rounded-md text-sm transition-colors
                 {isActive ? 'bg-[#1b2230] text-[#e9eefc]' : 'text-[#8b95a8] hover:bg-[#1b2230]/50 hover:text-[#e9eefc]'}"
             >
-              {#if channelTypeTag(ch) === 'voice'}
+              {#if isVoice}
                 <svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
                   <path d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m-4 0h8m-4-8a3 3 0 01-3-3V5a3 3 0 016 0v6a3 3 0 01-3 3z"/>
                 </svg>
@@ -179,6 +206,68 @@
               {/if}
               <span class="truncate">{ch.name}</span>
             </a>
+
+            {#if isVoice && vcMembers.length > 0}
+              <div class="ml-7 mr-1 space-y-0.5">
+                {#each vcMembers as vm (vm.id?.toString?.())}
+                  {@const vmUser = getUser(vm.userId ?? vm.user_id)}
+                  {@const speaking = isSpeaking(vm)}
+                  {@const avatarUrl = getUserAvatarUrl(vmUser)}
+                  {@const vmMuted = vm.muted ?? false}
+                  {@const vmDeafened = vm.deafened ?? false}
+                  {@const vmVideo = vm.videoOn ?? vm.video_on ?? false}
+                  {@const vmScreen = vm.screenSharing ?? vm.screen_sharing ?? false}
+                  <div class="flex items-center gap-1.5 px-1.5 py-1 rounded-md hover:bg-[#1b2230]/30 group/vm">
+                    <!-- Avatar with speaking ring -->
+                    <div class="relative flex-shrink-0">
+                      <div
+                        class="w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-semibold text-white overflow-hidden transition-shadow
+                          {speaking ? 'ring-2 ring-green-500 shadow-[0_0_6px_rgba(34,197,94,0.5)]' : ''}"
+                        style="background: #5865f2;"
+                      >
+                        {#if avatarUrl}
+                          <img src={avatarUrl} alt="" class="w-full h-full object-cover" />
+                        {:else}
+                          {(vmUser?.username ?? '?')[0]?.toUpperCase() ?? '?'}
+                        {/if}
+                      </div>
+                    </div>
+                    <!-- Username -->
+                    <span class="text-xs text-[#8b95a8] truncate flex-1 {speaking ? 'text-[#e9eefc]' : ''}">
+                      {vmUser?.displayName ?? vmUser?.display_name ?? vmUser?.username ?? 'Unknown'}
+                    </span>
+                    <!-- Status icons -->
+                    <div class="flex items-center gap-0.5 flex-shrink-0">
+                      {#if vmScreen}
+                        <!-- Screen share icon -->
+                        <svg class="w-3.5 h-3.5 text-[#8b95a8]" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" title="Sharing Screen">
+                          <path d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/>
+                        </svg>
+                      {/if}
+                      {#if vmVideo}
+                        <!-- Video icon -->
+                        <svg class="w-3.5 h-3.5 text-[#8b95a8]" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" title="Video On">
+                          <path d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"/>
+                        </svg>
+                      {/if}
+                      {#if vmDeafened}
+                        <!-- Deafened icon -->
+                        <svg class="w-3.5 h-3.5 text-red-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" title="Deafened">
+                          <path d="M5.636 18.364a9 9 0 010-12.728m12.728 0a9 9 0 010 12.728M9.172 14.828a4 4 0 010-5.656m5.656 0a4 4 0 010 5.656"/>
+                          <line x1="4" y1="4" x2="20" y2="20" stroke="currentColor" stroke-width="2"/>
+                        </svg>
+                      {:else if vmMuted}
+                        <!-- Muted icon -->
+                        <svg class="w-3.5 h-3.5 text-red-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" title="Muted">
+                          <path d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m-4 0h8m-4-8a3 3 0 01-3-3V5a3 3 0 016 0v6a3 3 0 01-3 3z"/>
+                          <line x1="4" y1="4" x2="20" y2="20" stroke="currentColor" stroke-width="2"/>
+                        </svg>
+                      {/if}
+                    </div>
+                  </div>
+                {/each}
+              </div>
+            {/if}
           {/each}
         {/if}
       </div>

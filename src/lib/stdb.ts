@@ -407,6 +407,24 @@ export function leaveVoiceChannel(channelId: bigint) {
   return Promise.resolve(callReducer(conn, 'leave_voice_channel', { channelId }));
 }
 
+export function kickFromVoice(channelId: bigint, targetUserId: bigint) {
+  const conn = get(connStore);
+  if (!conn) return Promise.reject(new Error('Not connected'));
+  return Promise.resolve(callReducer(conn, 'kick_from_voice', { channelId, targetUserId }));
+}
+
+export function updateVoiceState(payload: {
+  channelId: bigint;
+  muted: boolean;
+  deafened: boolean;
+  videoOn: boolean;
+  screenSharing: boolean;
+}) {
+  const conn = get(connStore);
+  if (!conn) return Promise.reject(new Error('Not connected'));
+  return Promise.resolve(callReducer(conn, 'update_voice_state', payload));
+}
+
 export function setChannelMediaSettings(settings: {
   channelId: bigint;
   audioTargetSampleRate: number;

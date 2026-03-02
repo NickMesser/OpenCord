@@ -7,7 +7,7 @@
   import {
     currentUser, channelsStore, channelMessagesStore, userAccountsStore,
     serverMembersStore, userSessionsStore, idEq, sendChannelMessage, deleteMessage, openDmThread, dmThreadsStore,
-    voiceMembersStore, channelMediaSettingsStore, setChannelMediaSettings,
+    voiceMembersStore, channelMediaSettingsStore, setChannelMediaSettings, kickFromVoice,
     messageReactionsStore, addReaction, removeReaction
   } from '$lib/stdb';
   import {
@@ -601,9 +601,19 @@
             {@const hex = m.identity?.toHexString?.() ?? ''}
             {@const level = $audioLevelsStore?.[hex]}
             {@const speaking = level && level.rms >= audioTalkingRmsThreshold && (Date.now() - level.at) < 1500}
-            <div class="flex items-center gap-2 px-2 py-1.5 bg-[#0b0d12] rounded-md">
-              <div class="w-2 h-2 rounded-full {speaking ? 'bg-green-400' : 'bg-[#1b2230]'}"></div>
-              <div class="text-sm text-[#e9eefc] truncate">{user?.displayName ?? user?.display_name ?? user?.username ?? 'Unknown'}</div>
+            {@const isMe = $currentUser && idEq(m.userId ?? m.user_id, $currentUser.id)}
+            <div class="flex items-center gap-2 px-2 py-1.5 bg-[#0b0d12] rounded-md group">
+              <div class="w-2 h-2 rounded-full flex-shrink-0 {speaking ? 'bg-green-400' : 'bg-[#1b2230]'}"></div>
+              <div class="text-sm text-[#e9eefc] truncate flex-1">{user?.displayName ?? user?.display_name ?? user?.username ?? 'Unknown'}</div>
+              {#if isAdmin && !isMe}
+                <button
+                  onclick={() => kickFromVoice(channelIdBig, BigInt((m.userId ?? m.user_id)?.toString?.() ?? '0')).catch(() => {})}
+                  class="hidden group-hover:block flex-shrink-0 text-[10px] text-red-400 hover:text-red-300 px-1.5 py-0.5 rounded hover:bg-red-900/20"
+                  title="Kick from voice"
+                >
+                  Kick
+                </button>
+              {/if}
             </div>
           {/each}
         {/if}

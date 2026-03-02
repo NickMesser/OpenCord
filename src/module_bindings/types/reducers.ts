@@ -20,6 +20,7 @@ import DeleteServerReducer from "../delete_server_reducer";
 import JoinDmCallReducer from "../join_dm_call_reducer";
 import JoinServerReducer from "../join_server_reducer";
 import JoinVoiceChannelReducer from "../join_voice_channel_reducer";
+import KickFromVoiceReducer from "../kick_from_voice_reducer";
 import LeaveDmCallReducer from "../leave_dm_call_reducer";
 import LeaveServerReducer from "../leave_server_reducer";
 import LeaveVoiceChannelReducer from "../leave_voice_channel_reducer";
@@ -41,6 +42,7 @@ import SetPublicEncryptionKeyReducer from "../set_public_encryption_key_reducer"
 import UpdateAvatarReducer from "../update_avatar_reducer";
 import UpdateBannerReducer from "../update_banner_reducer";
 import UpdateProfileReducer from "../update_profile_reducer";
+import UpdateVoiceStateReducer from "../update_voice_state_reducer";
 import UploadFileReducer from "../upload_file_reducer";
 
 export type AddReactionParams = __Infer<typeof AddReactionReducer>;
@@ -57,6 +59,7 @@ export type DeleteServerParams = __Infer<typeof DeleteServerReducer>;
 export type JoinDmCallParams = __Infer<typeof JoinDmCallReducer>;
 export type JoinServerParams = __Infer<typeof JoinServerReducer>;
 export type JoinVoiceChannelParams = __Infer<typeof JoinVoiceChannelReducer>;
+export type KickFromVoiceParams = __Infer<typeof KickFromVoiceReducer>;
 export type LeaveDmCallParams = __Infer<typeof LeaveDmCallReducer>;
 export type LeaveServerParams = __Infer<typeof LeaveServerReducer>;
 export type LeaveVoiceChannelParams = __Infer<typeof LeaveVoiceChannelReducer>;
@@ -78,5 +81,6 @@ export type SetPublicEncryptionKeyParams = __Infer<typeof SetPublicEncryptionKey
 export type UpdateAvatarParams = __Infer<typeof UpdateAvatarReducer>;
 export type UpdateBannerParams = __Infer<typeof UpdateBannerReducer>;
 export type UpdateProfileParams = __Infer<typeof UpdateProfileReducer>;
+export type UpdateVoiceStateParams = __Infer<typeof UpdateVoiceStateReducer>;
 export type UploadFileParams = __Infer<typeof UploadFileReducer>;
 
