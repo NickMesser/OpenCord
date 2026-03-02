@@ -1,12 +1,14 @@
 <script lang="ts">
   import { page } from '$app/stores';
   import { goto } from '$app/navigation';
+  import { fly } from 'svelte/transition';
   import {
     currentUser, serversStore, serverMembersStore, categoriesStore,
     channelsStore, inviteLinksStore, idEq,
     createCategory, createChannel, createInvite, deleteServer, leaveServer
   } from '$lib/stdb';
   import { voiceState, audioControlStore, toggleMute, toggleDeafen, leaveVoice } from '$lib/voice';
+  import { mobileNavOpen } from '$lib/mobile-nav';
 
   let { children } = $props();
 
@@ -122,8 +124,7 @@
   }
 </script>
 
-<!-- Channel sidebar (240px) -->
-<div class="w-60 flex-shrink-0 bg-[#0f121a] border-r border-[#1b2230] flex flex-col">
+{#snippet channelSidebarContent()}
   <!-- Server header -->
   <div class="h-12 px-4 flex items-center justify-between border-b border-[#1b2230] flex-shrink-0">
     <h2 class="font-semibold text-[#e9eefc] truncate">{server?.name ?? 'Unknown Server'}</h2>
@@ -291,6 +292,11 @@
       </div>
     </div>
   </div>
+{/snippet}
+
+<!-- Desktop channel sidebar -->
+<div class="hidden md:flex w-60 flex-shrink-0 bg-[#0f121a] border-r border-[#1b2230] flex-col">
+  {@render channelSidebarContent()}
 </div>
 
 <!-- Main content -->
@@ -298,10 +304,17 @@
   {@render children()}
 </div>
 
+<!-- Mobile channel sidebar overlay -->
+{#if $mobileNavOpen}
+  <div class="md:hidden fixed inset-y-0 left-[72px] z-50 w-60 bg-[#0f121a] border-r border-[#1b2230] flex flex-col shadow-2xl" transition:fly={{ x: -312, duration: 200 }}>
+    {@render channelSidebarContent()}
+  </div>
+{/if}
+
 <!-- Create Category modal -->
 {#if showCreateCategory}
   <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-  <div class="fixed inset-0 bg-black/60 z-50 flex items-center justify-center" onclick={() => showCreateCategory = false}>
+  <div class="fixed inset-0 bg-black/60 z-50 flex items-center justify-center px-4" onclick={() => showCreateCategory = false}>
     <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
     <div class="bg-[#0f121a] border border-[#1b2230] rounded-2xl p-6 w-full max-w-sm" role="dialog" onclick={(e) => e.stopPropagation()}>
       <h2 class="text-lg font-bold text-[#e9eefc] mb-4">Create Category</h2>
@@ -324,7 +337,7 @@
 <!-- Create Channel modal -->
 {#if showCreateChannel}
   <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-  <div class="fixed inset-0 bg-black/60 z-50 flex items-center justify-center" onclick={() => showCreateChannel = false}>
+  <div class="fixed inset-0 bg-black/60 z-50 flex items-center justify-center px-4" onclick={() => showCreateChannel = false}>
     <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
     <div class="bg-[#0f121a] border border-[#1b2230] rounded-2xl p-6 w-full max-w-sm" role="dialog" onclick={(e) => e.stopPropagation()}>
       <h2 class="text-lg font-bold text-[#e9eefc] mb-4">Create Channel</h2>
@@ -358,7 +371,7 @@
 <!-- Invite modal -->
 {#if showInvite}
   <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-  <div class="fixed inset-0 bg-black/60 z-50 flex items-center justify-center" onclick={() => showInvite = false}>
+  <div class="fixed inset-0 bg-black/60 z-50 flex items-center justify-center px-4" onclick={() => showInvite = false}>
     <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
     <div class="bg-[#0f121a] border border-[#1b2230] rounded-2xl p-6 w-full max-w-md" role="dialog" onclick={(e) => e.stopPropagation()}>
       <h2 class="text-lg font-bold text-[#e9eefc] mb-2">Invite friends to {server?.name}</h2>
@@ -371,11 +384,11 @@
               type="text"
               readonly
               value="{typeof window !== 'undefined' ? window.location.origin : ''}/invite/{inv.code}"
-              class="flex-1 bg-[#080a0f] border border-[#1b2230] text-[#e9eefc] rounded-lg px-4 py-2 text-sm outline-none"
+              class="flex-1 bg-[#080a0f] border border-[#1b2230] text-[#e9eefc] rounded-lg px-4 py-2 text-sm outline-none min-w-0"
             />
             <button
               onclick={() => copyInviteCode(inv.code)}
-              class="px-4 py-2 bg-[#5865f2] hover:bg-[#4752c4] text-white text-sm font-semibold rounded-lg transition-colors"
+              class="px-4 py-2 bg-[#5865f2] hover:bg-[#4752c4] text-white text-sm font-semibold rounded-lg transition-colors flex-shrink-0"
             >
               {inviteCopied ? 'Copied!' : 'Copy'}
             </button>

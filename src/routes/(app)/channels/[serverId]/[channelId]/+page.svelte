@@ -3,6 +3,7 @@
   import { page } from '$app/stores';
   import { goto } from '$app/navigation';
   import { tick } from 'svelte';
+  import { fly, fade } from 'svelte/transition';
   import {
     currentUser, channelsStore, channelMessagesStore, userAccountsStore,
     serverMembersStore, userSessionsStore, idEq, sendChannelMessage, deleteMessage, openDmThread, dmThreadsStore,
@@ -13,6 +14,7 @@
     voiceState, audioLevelsStore, remoteVideoFramesStore, localVideoStreamStore,
     audioControlStore, setInputGain, setOutputGain, toggleMute, toggleDeafen
   } from '$lib/voice';
+  import { mobileNavOpen, mobileMembersOpen } from '$lib/mobile-nav';
 
   let messageText = $state('');
   let messagesEl: HTMLDivElement | null = $state(null);
@@ -332,24 +334,73 @@
   })());
 </script>
 
+{#snippet memberListContent()}
+  {#each Object.entries(membersByRole) as [role, members]}
+    {#if members.length > 0}
+      <div class="mb-4">
+        <h4 class="text-xs font-semibold text-[#8b95a8] uppercase tracking-wide px-2 mb-2">
+          {role} — {members.length}
+        </h4>
+        {#each members as m (m.id?.toString?.())}
+          {@const status = getUserStatus(m.user?.id ?? m.userId ?? m.user_id)}
+          <div class="flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-[#1b2230]/50 transition-colors">
+            <div class="relative w-8 h-8 rounded-full bg-[#5865f2] flex items-center justify-center text-xs font-semibold text-white flex-shrink-0">
+              {(m.user?.username ?? '?')[0]?.toUpperCase()}
+              <span
+                class={`absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-[#0f121a] ${statusColor(status)}`}
+                title={status === 'dnd' ? 'Do not disturb' : status[0].toUpperCase() + status.slice(1)}
+              ></span>
+            </div>
+            <div class="min-w-0">
+              <div class="text-sm text-[#e9eefc] truncate">{m.user?.displayName ?? m.user?.display_name ?? m.user?.username ?? 'Unknown'}</div>
+            </div>
+            {#if !idEq(m.user?.id, $currentUser?.id)}
+              <button
+                onclick={() => handleStartDm(m.user?.id)}
+                class="ml-auto text-[11px] text-[#8b95a8] hover:text-[#e9eefc] px-2 py-1 rounded-md hover:bg-[#1b2230] flex-shrink-0"
+                title="Start direct message"
+              >
+                Message
+              </button>
+            {/if}
+          </div>
+        {/each}
+      </div>
+    {/if}
+  {/each}
+{/snippet}
+
 <!-- Chat area -->
 <div class="flex-1 flex flex-col min-w-0 bg-[#0f121a]">
   <!-- Channel header -->
-  <div class="h-12 px-4 flex items-center gap-2 border-b border-[#1b2230] flex-shrink-0">
-    <svg class="w-5 h-5 text-[#8b95a8]" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+  <div class="h-12 px-3 md:px-4 flex items-center gap-2 border-b border-[#1b2230] flex-shrink-0">
+    <!-- Mobile hamburger -->
+    <button onclick={() => $mobileNavOpen = true} class="md:hidden p-1.5 -ml-1 text-[#8b95a8] hover:text-[#e9eefc] rounded-md hover:bg-[#1b2230]/50 transition-colors">
+      <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+        <path d="M4 6h16M4 12h16M4 18h16"/>
+      </svg>
+    </button>
+    <svg class="w-5 h-5 text-[#8b95a8] flex-shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
       <path d="M7 20l4-16m2 16l4-16M6 9h14M4 15h14"/>
     </svg>
-    <h3 class="font-semibold text-[#e9eefc]">{channel?.name ?? 'unknown'}</h3>
+    <h3 class="font-semibold text-[#e9eefc] truncate">{channel?.name ?? 'unknown'}</h3>
+    <div class="flex-1"></div>
+    <!-- Mobile members toggle -->
+    <button onclick={() => $mobileMembersOpen = true} class="md:hidden p-1.5 text-[#8b95a8] hover:text-[#e9eefc] rounded-md hover:bg-[#1b2230]/50 transition-colors">
+      <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+        <path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4-4v2m22 4v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/>
+      </svg>
+    </button>
   </div>
 
   {#if isVoiceChannel}
-    <div class="border-b border-[#1b2230] p-4">
-      <div class="flex items-center justify-between gap-4">
+    <div class="border-b border-[#1b2230] p-3 md:p-4">
+      <div class="flex flex-wrap items-center justify-between gap-2 md:gap-4">
         <div>
           <div class="text-sm font-semibold text-[#e9eefc]">Voice Channel</div>
           <div class="text-xs text-[#8b95a8]">{voiceMembers.length} in voice</div>
         </div>
-        <div class="flex items-center gap-2">
+        <div class="flex flex-wrap items-center gap-2">
           {#if !isInVoice}
             <button
               onclick={handleJoinVoice}
@@ -449,6 +500,7 @@
               step="0.05"
               value={$audioControlStore.inputGain}
               oninput={(e) => setInputGain(Number((e.currentTarget as HTMLInputElement).value))}
+              class="w-20 md:w-auto"
             />
           </div>
           <div class="flex items-center gap-2">
@@ -460,13 +512,14 @@
               step="0.05"
               value={$audioControlStore.outputGain}
               oninput={(e) => setOutputGain(Number((e.currentTarget as HTMLInputElement).value))}
+              class="w-20 md:w-auto"
             />
           </div>
         </div>
       {/if}
 
       {#if $voiceState.videoEnabled || $voiceState.screenSharing || Object.keys($remoteVideoFramesStore ?? {}).length}
-        <div class="mt-4 grid grid-cols-2 md:grid-cols-3 gap-3">
+        <div class="mt-4 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
           {#if $voiceState.videoEnabled || $voiceState.screenSharing}
             <div class="rounded-lg overflow-hidden bg-[#0b0d12] border border-[#1b2230]">
               <video bind:this={localVideoEl} autoplay playsinline muted class="w-full h-36 object-cover"></video>
@@ -487,7 +540,7 @@
         <div class="mt-4 p-4 bg-[#0b0d12] border border-[#1b2230] rounded-lg">
           <h4 class="text-sm font-semibold text-[#e9eefc] mb-3">Voice Settings</h4>
           <form onsubmit={(e) => { e.preventDefault(); handleSaveSettings(); }} class="space-y-3">
-            <div class="grid grid-cols-2 gap-3">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <label class="block text-xs text-[#8b95a8] mb-1">Sample Rate</label>
                 <input type="number" bind:value={audioTargetSampleRate} min="8000" max="48000" step="1000"
@@ -519,7 +572,7 @@
               </div>
             </div>
 
-            <div class="grid grid-cols-2 gap-3">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <label class="block text-xs text-[#8b95a8] mb-1">Video Width</label>
                 <input type="number" bind:value={videoWidth} min="160" max="1280" step="10"
@@ -570,10 +623,10 @@
   <!-- Messages -->
   <div
     bind:this={messagesEl}
-    class="flex-1 overflow-y-auto px-4 py-4 space-y-1"
+    class="flex-1 overflow-y-auto px-3 md:px-4 py-4 space-y-1"
   >
     {#if messages.length === 0}
-      <div class="flex flex-col items-center justify-center h-full text-center">
+      <div class="flex flex-col items-center justify-center h-full text-center px-4">
         <div class="w-16 h-16 rounded-full bg-[#1b2230] flex items-center justify-center mb-4">
           <svg class="w-8 h-8 text-[#8b95a8]" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
             <path d="M7 20l4-16m2 16l4-16M6 9h14M4 15h14"/>
@@ -591,17 +644,17 @@
 
         {#if !sameSender}
           <div class="flex items-start gap-3 pt-3 group hover:bg-[#1b2230]/30 px-2 -mx-2 rounded-md">
-            <div class="w-10 h-10 rounded-full bg-[#5865f2] flex items-center justify-center text-sm font-semibold text-white flex-shrink-0 mt-0.5">
+            <div class="w-8 h-8 md:w-10 md:h-10 rounded-full bg-[#5865f2] flex items-center justify-center text-xs md:text-sm font-semibold text-white flex-shrink-0 mt-0.5">
               {(sender?.username ?? '?')[0]?.toUpperCase()}
             </div>
             <div class="min-w-0 flex-1">
-              <div class="flex items-baseline gap-2">
+              <div class="flex items-baseline gap-2 flex-wrap">
                 <span class="font-semibold text-[#e9eefc] text-sm">{sender?.displayName ?? sender?.display_name ?? sender?.username ?? 'Unknown'}</span>
                 <span class="text-xs text-[#8b95a8]">{formatTime(msg.sentAt ?? msg.sent_at)}</span>
                 {#if isOwn}
                   <button
                     onclick={() => handleDelete(msg.id)}
-                    class="opacity-0 group-hover:opacity-100 text-xs text-red-400 hover:text-red-300 ml-auto transition-opacity"
+                    class="md:opacity-0 md:group-hover:opacity-100 text-xs text-red-400 hover:text-red-300 ml-auto transition-opacity"
                   >
                     Delete
                   </button>
@@ -612,13 +665,13 @@
           </div>
         {:else}
           <div class="flex items-start gap-3 group hover:bg-[#1b2230]/30 px-2 -mx-2 rounded-md">
-            <div class="w-10 flex-shrink-0"></div>
+            <div class="w-8 md:w-10 flex-shrink-0"></div>
             <div class="min-w-0 flex-1 flex items-start gap-2">
               <p class="text-[#e9eefc] text-sm break-words whitespace-pre-wrap flex-1">{msg.content}</p>
               {#if isOwn}
                 <button
                   onclick={() => handleDelete(msg.id)}
-                  class="opacity-0 group-hover:opacity-100 text-xs text-red-400 hover:text-red-300 flex-shrink-0 transition-opacity"
+                  class="md:opacity-0 md:group-hover:opacity-100 text-xs text-red-400 hover:text-red-300 flex-shrink-0 transition-opacity"
                 >
                   Delete
                 </button>
@@ -631,20 +684,20 @@
   </div>
 
   <!-- Message composer -->
-  <div class="px-4 pb-4 flex-shrink-0">
-    <div class="flex items-center bg-[#1b2230] rounded-xl px-4">
+  <div class="px-3 md:px-4 pb-3 md:pb-4 flex-shrink-0">
+    <div class="flex items-center bg-[#1b2230] rounded-xl px-3 md:px-4">
       <input
         type="text"
         bind:value={messageText}
         onkeydown={onKeyDown}
         placeholder="Message #{channel?.name ?? 'channel'}"
-        class="flex-1 bg-transparent text-[#e9eefc] py-3 outline-none placeholder-[#8b95a8] text-sm"
+        class="flex-1 bg-transparent text-[#e9eefc] py-3 outline-none placeholder-[#8b95a8] text-sm min-w-0"
       />
       <button
         onclick={handleSend}
         disabled={!messageText.trim()}
         aria-label="Send message"
-        class="ml-2 text-[#8b95a8] hover:text-[#e9eefc] disabled:opacity-30 transition-colors"
+        class="ml-2 text-[#8b95a8] hover:text-[#e9eefc] disabled:opacity-30 transition-colors flex-shrink-0"
       >
         <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
           <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
@@ -654,39 +707,24 @@
   </div>
 </div>
 
-<!-- Member list (right sidebar) -->
-<div class="w-60 flex-shrink-0 bg-[#0f121a] border-l border-[#1b2230] overflow-y-auto py-4 px-3">
-  {#each Object.entries(membersByRole) as [role, members]}
-    {#if members.length > 0}
-      <div class="mb-4">
-        <h4 class="text-xs font-semibold text-[#8b95a8] uppercase tracking-wide px-2 mb-2">
-          {role} — {members.length}
-        </h4>
-        {#each members as m (m.id?.toString?.())}
-          {@const status = getUserStatus(m.user?.id ?? m.userId ?? m.user_id)}
-          <div class="flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-[#1b2230]/50 transition-colors">
-            <div class="relative w-8 h-8 rounded-full bg-[#5865f2] flex items-center justify-center text-xs font-semibold text-white flex-shrink-0">
-              {(m.user?.username ?? '?')[0]?.toUpperCase()}
-              <span
-                class={`absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-[#0f121a] ${statusColor(status)}`}
-                title={status === 'dnd' ? 'Do not disturb' : status[0].toUpperCase() + status.slice(1)}
-              ></span>
-            </div>
-            <div class="min-w-0">
-              <div class="text-sm text-[#e9eefc] truncate">{m.user?.displayName ?? m.user?.display_name ?? m.user?.username ?? 'Unknown'}</div>
-            </div>
-            {#if !idEq(m.user?.id, $currentUser?.id)}
-              <button
-                onclick={() => handleStartDm(m.user?.id)}
-                class="ml-auto text-[11px] text-[#8b95a8] hover:text-[#e9eefc] px-2 py-1 rounded-md hover:bg-[#1b2230]"
-                title="Start direct message"
-              >
-                Message
-              </button>
-            {/if}
-          </div>
-        {/each}
-      </div>
-    {/if}
-  {/each}
+<!-- Desktop member list (right sidebar) -->
+<div class="hidden md:block w-60 flex-shrink-0 bg-[#0f121a] border-l border-[#1b2230] overflow-y-auto py-4 px-3">
+  {@render memberListContent()}
 </div>
+
+<!-- Mobile member list overlay -->
+{#if $mobileMembersOpen}
+  <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+  <div class="md:hidden fixed inset-0 z-40 bg-black/50" transition:fade={{ duration: 150 }} onclick={() => $mobileMembersOpen = false}></div>
+  <div class="md:hidden fixed inset-y-0 right-0 z-50 w-64 bg-[#0f121a] border-l border-[#1b2230] overflow-y-auto py-4 px-3 shadow-2xl" transition:fly={{ x: 264, duration: 200 }}>
+    <div class="flex items-center justify-between mb-3 px-2">
+      <h3 class="text-sm font-semibold text-[#e9eefc]">Members</h3>
+      <button onclick={() => $mobileMembersOpen = false} class="p-1 text-[#8b95a8] hover:text-[#e9eefc]">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path d="M6 18L18 6M6 6l12 12"/>
+        </svg>
+      </button>
+    </div>
+    {@render memberListContent()}
+  </div>
+{/if}

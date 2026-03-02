@@ -1,11 +1,14 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { goto } from '$app/navigation';
+  import { page } from '$app/stores';
+  import { fly, fade } from 'svelte/transition';
   import {
     connectStdb, isConnected, isLoggedIn, currentUser,
     serversStore, serverMembersStore, idEq,
     createServer, logout
   } from '$lib/stdb';
+  import { mobileNavOpen, mobileMembersOpen } from '$lib/mobile-nav';
 
   let { children } = $props();
 
@@ -24,6 +27,12 @@
     if ($isConnected && !$isLoggedIn) {
       goto('/login');
     }
+  });
+
+  $effect(() => {
+    $page.url.pathname;
+    $mobileNavOpen = false;
+    $mobileMembersOpen = false;
   });
 
   let myServers = $derived(
@@ -90,77 +99,76 @@
   }
 </script>
 
+{#snippet serverNavContent()}
+  <a
+    href="/"
+    class="w-12 h-12 rounded-2xl bg-[#0f121a] hover:bg-[#5865f2] hover:rounded-xl flex items-center justify-center transition-all duration-200 mb-1"
+    title="Home"
+  >
+    <svg class="w-6 h-6 text-[#e9eefc]" fill="currentColor" viewBox="0 0 24 24">
+      <path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/>
+    </svg>
+  </a>
+
+  <div class="w-8 h-[2px] bg-[#1b2230] rounded-full"></div>
+
+  <a
+    href="/dm"
+    class="w-12 h-12 rounded-2xl bg-[#0f121a] hover:bg-[#5865f2] hover:rounded-xl flex items-center justify-center transition-all duration-200"
+    title="Direct Messages"
+  >
+    <svg class="w-6 h-6 text-[#e9eefc]" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+      <path d="M7 8h10M7 12h6m-9 8l3-3h12a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/>
+    </svg>
+  </a>
+
+  {#each myServers as server (server.id?.toString?.())}
+    <a
+      href="/channels/{server.id}"
+      class="w-12 h-12 rounded-2xl bg-[#0f121a] hover:bg-[#5865f2] hover:rounded-xl flex items-center justify-center transition-all duration-200 text-sm font-semibold"
+      title={server.name}
+    >
+      {getInitials(server.name)}
+    </a>
+  {/each}
+
+  <button
+    onclick={() => showCreateServer = true}
+    class="w-12 h-12 rounded-2xl bg-[#0f121a] hover:bg-[#23a559] hover:rounded-xl flex items-center justify-center transition-all duration-200 text-[#23a559] hover:text-white"
+    title="Add a Server"
+  >
+    <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+      <path d="M12 5v14M5 12h14"/>
+    </svg>
+  </button>
+
+  <button
+    onclick={() => { showJoinServer = true; joinError = ''; }}
+    class="w-12 h-12 rounded-2xl bg-[#0f121a] hover:bg-[#5865f2] hover:rounded-xl flex items-center justify-center transition-all duration-200 text-[#5865f2] hover:text-white"
+    title="Join a Server"
+  >
+    <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+      <path d="M10.5 13.5L13.5 10.5M8 16a4 4 0 010-5.657l2.343-2.343a4 4 0 015.657 0m0 0a4 4 0 010 5.657l-2.343 2.343a4 4 0 01-5.657 0"/>
+    </svg>
+  </button>
+
+  <div class="flex-1"></div>
+
+  <button
+    onclick={handleLogout}
+    class="w-12 h-12 rounded-2xl bg-[#0f121a] hover:bg-red-900/50 flex items-center justify-center transition-all duration-200 text-[#8b95a8] hover:text-red-400"
+    title="Log out"
+  >
+    <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+      <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9"/>
+    </svg>
+  </button>
+{/snippet}
+
 <div class="h-screen flex bg-[#0b0d12] text-[#e9eefc] overflow-hidden">
-  <!-- Server sidebar (72px) -->
-  <nav class="w-[72px] flex-shrink-0 bg-[#080a0f] flex flex-col items-center py-3 gap-2 overflow-y-auto">
-    <!-- Home button -->
-    <a
-      href="/"
-      class="w-12 h-12 rounded-2xl bg-[#0f121a] hover:bg-[#5865f2] hover:rounded-xl flex items-center justify-center transition-all duration-200 mb-1"
-      title="Home"
-    >
-      <svg class="w-6 h-6 text-[#e9eefc]" fill="currentColor" viewBox="0 0 24 24">
-        <path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/>
-      </svg>
-    </a>
-
-    <div class="w-8 h-[2px] bg-[#1b2230] rounded-full"></div>
-
-    <a
-      href="/dm"
-      class="w-12 h-12 rounded-2xl bg-[#0f121a] hover:bg-[#5865f2] hover:rounded-xl flex items-center justify-center transition-all duration-200"
-      title="Direct Messages"
-    >
-      <svg class="w-6 h-6 text-[#e9eefc]" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-        <path d="M7 8h10M7 12h6m-9 8l3-3h12a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/>
-      </svg>
-    </a>
-
-    <!-- Server icons -->
-    {#each myServers as server (server.id?.toString?.())}
-      <a
-        href="/channels/{server.id}"
-        class="w-12 h-12 rounded-2xl bg-[#0f121a] hover:bg-[#5865f2] hover:rounded-xl flex items-center justify-center transition-all duration-200 text-sm font-semibold"
-        title={server.name}
-      >
-        {getInitials(server.name)}
-      </a>
-    {/each}
-
-    <!-- Add server button -->
-    <button
-      onclick={() => showCreateServer = true}
-      class="w-12 h-12 rounded-2xl bg-[#0f121a] hover:bg-[#23a559] hover:rounded-xl flex items-center justify-center transition-all duration-200 text-[#23a559] hover:text-white"
-      title="Add a Server"
-    >
-      <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-        <path d="M12 5v14M5 12h14"/>
-      </svg>
-    </button>
-
-    <!-- Join server button -->
-    <button
-      onclick={() => { showJoinServer = true; joinError = ''; }}
-      class="w-12 h-12 rounded-2xl bg-[#0f121a] hover:bg-[#5865f2] hover:rounded-xl flex items-center justify-center transition-all duration-200 text-[#5865f2] hover:text-white"
-      title="Join a Server"
-    >
-      <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-        <path d="M10.5 13.5L13.5 10.5M8 16a4 4 0 010-5.657l2.343-2.343a4 4 0 015.657 0m0 0a4 4 0 010 5.657l-2.343 2.343a4 4 0 01-5.657 0"/>
-      </svg>
-    </button>
-
-    <div class="flex-1"></div>
-
-    <!-- Logout button -->
-    <button
-      onclick={handleLogout}
-      class="w-12 h-12 rounded-2xl bg-[#0f121a] hover:bg-red-900/50 flex items-center justify-center transition-all duration-200 text-[#8b95a8] hover:text-red-400"
-      title="Log out"
-    >
-      <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-        <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9"/>
-      </svg>
-    </button>
+  <!-- Desktop server sidebar -->
+  <nav class="hidden md:flex w-[72px] flex-shrink-0 bg-[#080a0f] flex-col items-center py-3 gap-2 overflow-y-auto">
+    {@render serverNavContent()}
   </nav>
 
   <!-- Main content area -->
@@ -169,10 +177,19 @@
   </div>
 </div>
 
+<!-- Mobile server sidebar overlay -->
+{#if $mobileNavOpen}
+  <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+  <div class="md:hidden fixed inset-0 z-40 bg-black/50" transition:fade={{ duration: 150 }} onclick={() => $mobileNavOpen = false}></div>
+  <nav class="md:hidden fixed inset-y-0 left-0 z-50 w-[72px] bg-[#080a0f] flex flex-col items-center py-3 gap-2 overflow-y-auto shadow-2xl" transition:fly={{ x: -72, duration: 200 }}>
+    {@render serverNavContent()}
+  </nav>
+{/if}
+
 <!-- Create server modal -->
 {#if showCreateServer}
   <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-  <div class="fixed inset-0 bg-black/60 z-50 flex items-center justify-center" onclick={() => showCreateServer = false}>
+  <div class="fixed inset-0 bg-black/60 z-50 flex items-center justify-center px-4" onclick={() => showCreateServer = false}>
     <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
     <div class="bg-[#0f121a] border border-[#1b2230] rounded-2xl p-6 w-full max-w-md" role="dialog" onclick={(e) => e.stopPropagation()}>
       <h2 class="text-xl font-bold text-[#e9eefc] mb-1">Create a server</h2>
@@ -214,7 +231,7 @@
 <!-- Join server modal -->
 {#if showJoinServer}
   <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-  <div class="fixed inset-0 bg-black/60 z-50 flex items-center justify-center" onclick={() => showJoinServer = false}>
+  <div class="fixed inset-0 bg-black/60 z-50 flex items-center justify-center px-4" onclick={() => showJoinServer = false}>
     <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
     <div class="bg-[#0f121a] border border-[#1b2230] rounded-2xl p-6 w-full max-w-md" role="dialog" onclick={(e) => e.stopPropagation()}>
       <h2 class="text-xl font-bold text-[#e9eefc] mb-1">Join a server</h2>

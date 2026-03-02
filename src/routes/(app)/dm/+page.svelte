@@ -12,9 +12,10 @@
     setPublicEncryptionKey
   } from '$lib/stdb';
   import { ensureLocalE2eeKey, getLocalPublicE2eeKey } from '$lib/dm-crypto';
+  import { mobileNavOpen } from '$lib/mobile-nav';
 
   let search = $state('');
-  let syncingKey = $state(false);
+  let syncingKey = false;
 
   function toBig(v: any): bigint {
     if (typeof v === 'bigint') return v;
@@ -86,16 +87,27 @@
   }
 </script>
 
-<div class="flex-1 min-w-0 flex bg-[#0f121a]">
-  <div class="w-80 border-r border-[#1b2230] p-4">
-    <h2 class="text-[#e9eefc] font-semibold text-lg mb-3">Direct Messages</h2>
+<div class="flex-1 min-w-0 flex flex-col md:flex-row bg-[#0f121a]">
+  <!-- Mobile header -->
+  <div class="md:hidden flex items-center h-12 px-3 border-b border-[#1b2230] flex-shrink-0">
+    <button onclick={() => $mobileNavOpen = true} class="p-1.5 -ml-1 text-[#8b95a8] hover:text-[#e9eefc] rounded-md hover:bg-[#1b2230]/50 transition-colors">
+      <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+        <path d="M4 6h16M4 12h16M4 18h16"/>
+      </svg>
+    </button>
+    <h2 class="text-[#e9eefc] font-semibold ml-2">Direct Messages</h2>
+  </div>
+
+  <!-- User search panel -->
+  <div class="w-full md:w-80 md:border-r border-[#1b2230] p-4 flex-shrink-0">
+    <h2 class="hidden md:block text-[#e9eefc] font-semibold text-lg mb-3">Direct Messages</h2>
     <input
       type="text"
       bind:value={search}
       placeholder="Search users"
       class="w-full bg-[#080a0f] border border-[#1b2230] text-[#e9eefc] rounded-lg px-3 py-2 outline-none focus:border-[#5865f2]"
     />
-    <div class="mt-3 space-y-1 max-h-[calc(100vh-150px)] overflow-y-auto">
+    <div class="mt-3 space-y-1 max-h-60 md:max-h-[calc(100vh-150px)] overflow-y-auto">
       {#each users as u (u.id?.toString?.())}
         <button
           onclick={() => startDm(u.id)}
@@ -108,7 +120,8 @@
     </div>
   </div>
 
-  <div class="flex-1 min-w-0 p-4">
+  <!-- Recent chats -->
+  <div class="flex-1 min-w-0 p-4 border-t md:border-t-0 border-[#1b2230]">
     <h3 class="text-[#e9eefc] font-semibold mb-3">Recent Chats</h3>
     {#if !$currentUser || myThreads.length === 0}
       <div class="text-[#8b95a8] text-sm">No direct messages yet. Search for someone to start chatting.</div>

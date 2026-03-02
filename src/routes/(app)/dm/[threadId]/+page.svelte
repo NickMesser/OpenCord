@@ -21,10 +21,11 @@
     setDmScreenShareEnabled,
     dmCallState
   } from '$lib/voice';
+  import { mobileNavOpen } from '$lib/mobile-nav';
 
   let messageText = $state('');
   let messagesEl: HTMLDivElement | null = $state(null);
-  let decrypting = $state(false);
+  let decrypting = false;
   let decryptedMap = $state<Record<string, string>>({});
 
   let threadId = $derived($page.params.threadId);
@@ -138,34 +139,49 @@
 </script>
 
 <div class="flex-1 flex flex-col min-w-0 bg-[#0f121a]">
-  <div class="h-12 px-4 border-b border-[#1b2230] flex items-center justify-between">
-    <div>
-      <div class="text-sm text-[#e9eefc] font-semibold">{other?.displayName ?? other?.display_name ?? other?.username ?? 'Direct Message'}</div>
-      <div class="text-[11px] text-[#8b95a8]">@{other?.username ?? ''}</div>
+  <!-- Header -->
+  <div class="h-12 px-3 md:px-4 border-b border-[#1b2230] flex items-center justify-between flex-shrink-0">
+    <div class="flex items-center gap-2 min-w-0">
+      <!-- Mobile hamburger -->
+      <button onclick={() => $mobileNavOpen = true} class="md:hidden p-1.5 -ml-1 text-[#8b95a8] hover:text-[#e9eefc] rounded-md hover:bg-[#1b2230]/50 transition-colors flex-shrink-0">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path d="M4 6h16M4 12h16M4 18h16"/>
+        </svg>
+      </button>
+      <!-- Mobile back button -->
+      <a href="/dm" class="md:hidden p-1.5 text-[#8b95a8] hover:text-[#e9eefc] rounded-md hover:bg-[#1b2230]/50 transition-colors flex-shrink-0">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path d="M15 19l-7-7 7-7"/>
+        </svg>
+      </a>
+      <div class="min-w-0">
+        <div class="text-sm text-[#e9eefc] font-semibold truncate">{other?.displayName ?? other?.display_name ?? other?.username ?? 'Direct Message'}</div>
+        <div class="text-[11px] text-[#8b95a8] truncate">@{other?.username ?? ''}</div>
+      </div>
     </div>
-    <div class="flex items-center gap-2">
+    <div class="flex items-center gap-1.5 md:gap-2 flex-shrink-0">
       <button
         onclick={handleCallToggle}
-        class="px-3 py-1.5 text-sm rounded-md bg-[#1b2230] hover:bg-[#263146] text-[#e9eefc]"
+        class="px-2.5 md:px-3 py-1.5 text-xs md:text-sm rounded-md bg-[#1b2230] hover:bg-[#263146] text-[#e9eefc]"
       >
-        {inThisCall ? 'Leave Call' : 'Start Call'}
+        {inThisCall ? 'Leave Call' : 'Call'}
       </button>
       {#if inThisCall}
-        <button onclick={() => setDmVideoEnabled(!$dmCallState.videoEnabled)} class="px-3 py-1.5 text-sm rounded-md bg-[#1b2230] hover:bg-[#263146] text-[#e9eefc]">
-          {$dmCallState.videoEnabled ? 'Stop Video' : 'Start Video'}
+        <button onclick={() => setDmVideoEnabled(!$dmCallState.videoEnabled)} class="px-2.5 md:px-3 py-1.5 text-xs md:text-sm rounded-md bg-[#1b2230] hover:bg-[#263146] text-[#e9eefc]">
+          {$dmCallState.videoEnabled ? 'Stop Video' : 'Video'}
         </button>
-        <button onclick={() => setDmScreenShareEnabled(!$dmCallState.screenSharing)} class="px-3 py-1.5 text-sm rounded-md bg-[#1b2230] hover:bg-[#263146] text-[#e9eefc]">
-          {$dmCallState.screenSharing ? 'Stop Share' : 'Share Screen'}
+        <button onclick={() => setDmScreenShareEnabled(!$dmCallState.screenSharing)} class="hidden sm:block px-2.5 md:px-3 py-1.5 text-xs md:text-sm rounded-md bg-[#1b2230] hover:bg-[#263146] text-[#e9eefc]">
+          {$dmCallState.screenSharing ? 'Stop Share' : 'Share'}
         </button>
       {/if}
     </div>
   </div>
 
-  <div class="px-4 py-1 text-[11px] text-[#8b95a8] border-b border-[#1b2230]">
+  <div class="px-3 md:px-4 py-1 text-[11px] text-[#8b95a8] border-b border-[#1b2230]">
     Private call media is transport-private but not end-to-end encrypted in this release.
   </div>
 
-  <div bind:this={messagesEl} class="flex-1 overflow-y-auto px-4 py-4 space-y-2">
+  <div bind:this={messagesEl} class="flex-1 overflow-y-auto px-3 md:px-4 py-4 space-y-2">
     {#if !thread}
       <div class="text-sm text-[#8b95a8]">Loading DM thread...</div>
     {:else if messages.length === 0}
@@ -188,18 +204,18 @@
     {/if}
   </div>
 
-  <div class="px-4 pb-4">
-    <div class="flex items-center bg-[#1b2230] rounded-xl px-4">
+  <div class="px-3 md:px-4 pb-3 md:pb-4">
+    <div class="flex items-center bg-[#1b2230] rounded-xl px-3 md:px-4">
       <input
         type="text"
         bind:value={messageText}
         placeholder="Send an encrypted message"
-        class="flex-1 bg-transparent text-[#e9eefc] py-3 outline-none placeholder-[#8b95a8] text-sm"
+        class="flex-1 bg-transparent text-[#e9eefc] py-3 outline-none placeholder-[#8b95a8] text-sm min-w-0"
       />
       <button
         onclick={handleSend}
         disabled={!messageText.trim()}
-        class="ml-2 text-[#8b95a8] hover:text-[#e9eefc] disabled:opacity-30 transition-colors"
+        class="ml-2 text-[#8b95a8] hover:text-[#e9eefc] disabled:opacity-30 transition-colors flex-shrink-0"
       >
         Send
       </button>
