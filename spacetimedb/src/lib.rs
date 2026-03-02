@@ -470,7 +470,8 @@ pub fn client_connected(_ctx: &ReducerContext) {}
 
 #[spacetimedb::reducer(client_disconnected)]
 pub fn client_disconnected(ctx: &ReducerContext) {
-    ctx.db.user_session().identity().delete(&ctx.sender());
+    // Keep UserSession alive so the user stays logged in across page refreshes.
+    // The explicit `logout` reducer handles session deletion when intentional.
     let ids: Vec<u64> = ctx
         .db
         .voice_member()
