@@ -12,8 +12,9 @@ import {
 
 export default __t.row({
   id: __t.u64().primaryKey(),
-  channelId: __t.u64().name("channel_id"),
-  senderId: __t.u64().name("sender_id"),
-  content: __t.string(),
-  sentAt: __t.timestamp().name("sent_at"),
+  pairKey: __t.string().name("pair_key"),
+  userLowId: __t.u64().name("user_low_id"),
+  userHighId: __t.u64().name("user_high_id"),
+  createdAt: __t.timestamp().name("created_at"),
+  lastMessageAt: __t.timestamp().name("last_message_at"),
 });

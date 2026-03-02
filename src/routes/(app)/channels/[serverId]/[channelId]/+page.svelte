@@ -1,10 +1,11 @@
 <script lang="ts">
   import { browser } from '$app/environment';
   import { page } from '$app/stores';
+  import { goto } from '$app/navigation';
   import { tick } from 'svelte';
   import {
     currentUser, channelsStore, channelMessagesStore, userAccountsStore,
-    serverMembersStore, userSessionsStore, idEq, sendChannelMessage, deleteMessage,
+    serverMembersStore, userSessionsStore, idEq, sendChannelMessage, deleteMessage, openDmThread, dmThreadsStore,
     voiceMembersStore, channelMediaSettingsStore, setChannelMediaSettings
   } from '$lib/stdb';
   import {
@@ -291,6 +292,21 @@
     try {
       await deleteMessage(BigInt(msgId?.toString?.() ?? '0'));
     } catch (e) { console.error(e); }
+  }
+
+  async function handleStartDm(userId: any) {
+    if (!$currentUser || idEq($currentUser.id, userId)) return;
+    const targetId = BigInt(userId?.toString?.() ?? '0');
+    await openDmThread(targetId);
+    await tick();
+    const myId = BigInt($currentUser.id?.toString?.() ?? '0');
+    const low = myId < targetId ? myId : targetId;
+    const high = myId < targetId ? targetId : myId;
+    const pairKey = `${low.toString()}:${high.toString()}`;
+    const thread = ($dmThreadsStore ?? []).find((t: any) => (t.pairKey ?? t.pair_key) === pairKey);
+    if (thread?.id) {
+      goto(`/dm/${thread.id}`);
+    }
   }
 
   $effect(() => {
@@ -659,6 +675,15 @@
             <div class="min-w-0">
               <div class="text-sm text-[#e9eefc] truncate">{m.user?.displayName ?? m.user?.display_name ?? m.user?.username ?? 'Unknown'}</div>
             </div>
+            {#if !idEq(m.user?.id, $currentUser?.id)}
+              <button
+                onclick={() => handleStartDm(m.user?.id)}
+                class="ml-auto text-[11px] text-[#8b95a8] hover:text-[#e9eefc] px-2 py-1 rounded-md hover:bg-[#1b2230]"
+                title="Start direct message"
+              >
+                Message
+              </button>
+            {/if}
           </div>
         {/each}
       </div>

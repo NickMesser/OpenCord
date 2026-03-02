@@ -106,6 +106,16 @@
 
     <div class="w-8 h-[2px] bg-[#1b2230] rounded-full"></div>
 
+    <a
+      href="/dm"
+      class="w-12 h-12 rounded-2xl bg-[#0f121a] hover:bg-[#5865f2] hover:rounded-xl flex items-center justify-center transition-all duration-200"
+      title="Direct Messages"
+    >
+      <svg class="w-6 h-6 text-[#e9eefc]" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+        <path d="M7 8h10M7 12h6m-9 8l3-3h12a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/>
+      </svg>
+    </a>
+
     <!-- Server icons -->
     {#each myServers as server (server.id?.toString?.())}
       <a

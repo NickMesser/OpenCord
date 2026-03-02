@@ -20,6 +20,10 @@ export const channelsStore = writable<any[]>([]);
 export const channelMessagesStore = writable<any[]>([]);
 export const voiceMembersStore = writable<any[]>([]);
 export const channelMediaSettingsStore = writable<any[]>([]);
+export const dmThreadsStore = writable<any[]>([]);
+export const dmMembersStore = writable<any[]>([]);
+export const dmMessagesStore = writable<any[]>([]);
+export const dmCallMembersStore = writable<any[]>([]);
 
 export const currentUser = derived(
   [identityStore, userSessionsStore, userAccountsStore],
@@ -176,15 +180,15 @@ export function onEventInsert(tableName: string, handler: (row: any) => void) {
 function attachCallbacks(conn: DbConnection) {
   const bind = (
     tableName: string,
-    store: ReturnType<typeof writable>,
+    store: any,
     upsert: (arr: any[], row: any) => any[],
     remove: (arr: any[], row: any) => any[]
   ) => {
     const t = getTable(conn, tableName);
     if (!t) return;
-    t.onInsert(safe(`${tableName}.ins`, (_e: any, row: any) => store.update((a: any[]) => upsert(a, row))));
-    t.onUpdate(safe(`${tableName}.upd`, (_e: any, _old: any, row: any) => store.update((a: any[]) => upsert(a, row))));
-    t.onDelete(safe(`${tableName}.del`, (_e: any, row: any) => store.update((a: any[]) => remove(a, row))));
+    t.onInsert(safe(`${tableName}.ins`, (_e: any, row: any) => store.update((a: any) => upsert((a ?? []) as any[], row))));
+    t.onUpdate(safe(`${tableName}.upd`, (_e: any, _old: any, row: any) => store.update((a: any) => upsert((a ?? []) as any[], row))));
+    t.onDelete(safe(`${tableName}.del`, (_e: any, row: any) => store.update((a: any) => remove((a ?? []) as any[], row))));
   };
 
   bind('user_account', userAccountsStore, upsertById, removeById);
@@ -197,6 +201,10 @@ function attachCallbacks(conn: DbConnection) {
   bind('channel_message', channelMessagesStore, upsertById, removeById);
   bind('voice_member', voiceMembersStore, upsertById, removeById);
   bind('channel_media_settings', channelMediaSettingsStore, upsertByChannelId, removeByChannelId);
+  bind('dm_thread', dmThreadsStore, upsertById, removeById);
+  bind('dm_member', dmMembersStore, upsertById, removeById);
+  bind('dm_message', dmMessagesStore, upsertById, removeById);
+  bind('dm_call_member', dmCallMembersStore, upsertById, removeById);
 }
 
 function loadInitialData(conn: DbConnection) {
@@ -214,6 +222,10 @@ function loadInitialData(conn: DbConnection) {
   load('channel_message', channelMessagesStore);
   load('voice_member', voiceMembersStore);
   load('channel_media_settings', channelMediaSettingsStore);
+  load('dm_thread', dmThreadsStore);
+  load('dm_member', dmMembersStore);
+  load('dm_message', dmMessagesStore);
+  load('dm_call_member', dmCallMembersStore);
 }
 
 // ---------------------------------------------------------------------------
@@ -431,4 +443,98 @@ export function sendVideoFrame(payload: {
   const conn = get(connStore);
   if (!conn) return Promise.reject(new Error('Not connected'));
   return Promise.resolve(callReducer(conn, 'send_video_frame', payload));
+}
+
+export function setPublicEncryptionKey(publicEncryptionKey: Uint8Array) {
+  const conn = get(connStore);
+  if (!conn) return Promise.reject(new Error('Not connected'));
+  return Promise.resolve(callReducer(conn, 'set_public_encryption_key', { publicEncryptionKey }));
+}
+
+export function openDmThread(targetUserId: bigint) {
+  const conn = get(connStore);
+  if (!conn) return Promise.reject(new Error('Not connected'));
+  return Promise.resolve(callReducer(conn, 'open_dm_thread', { targetUserId }));
+}
+
+export function sendDmMessage(payload: {
+  threadId: bigint;
+  receiverUserId: bigint;
+  senderEphemeralPubkey: Uint8Array;
+  nonce: Uint8Array;
+  ciphertext: Uint8Array;
+}) {
+  const conn = get(connStore);
+  if (!conn) return Promise.reject(new Error('Not connected'));
+  return Promise.resolve(callReducer(conn, 'send_dm_message', payload));
+}
+
+export function deleteDmMessage(messageId: bigint) {
+  const conn = get(connStore);
+  if (!conn) return Promise.reject(new Error('Not connected'));
+  return Promise.resolve(callReducer(conn, 'delete_dm_message', { messageId }));
+}
+
+export function joinDmCall(threadId: bigint) {
+  const conn = get(connStore);
+  if (!conn) return Promise.reject(new Error('Not connected'));
+  return Promise.resolve(callReducer(conn, 'join_dm_call', { threadId }));
+}
+
+export function leaveDmCall(threadId: bigint) {
+  const conn = get(connStore);
+  if (!conn) return Promise.reject(new Error('Not connected'));
+  return Promise.resolve(callReducer(conn, 'leave_dm_call', { threadId }));
+}
+
+export function sendDmAudioFrame(payload: {
+  threadId: bigint;
+  seq: number;
+  sampleRate: number;
+  channels: number;
+  rms: number;
+  pcm16le: Uint8Array;
+}) {
+  const conn = get(connStore);
+  if (!conn) return Promise.reject(new Error('Not connected'));
+  return Promise.resolve(callReducer(conn, 'send_dm_audio_frame', payload));
+}
+
+export function sendDmVideoFrame(payload: {
+  threadId: bigint;
+  seq: number;
+  width: number;
+  height: number;
+  jpeg: Uint8Array;
+}) {
+  const conn = get(connStore);
+  if (!conn) return Promise.reject(new Error('Not connected'));
+  return Promise.resolve(callReducer(conn, 'send_dm_video_frame', payload));
+}
+
+export function getMyDmThreads(userId: any, threads: any[], members: any[]) {
+  const uid = toBigIntId(userId);
+  const myThreadIds = new Set(
+    members
+      .filter((m: any) => toBigIntId(m.userId ?? m.user_id) === uid)
+      .map((m: any) => toBigIntId(m.threadId ?? m.thread_id).toString())
+  );
+  return threads
+    .filter((t: any) => myThreadIds.has(toBigIntId(t.id).toString()))
+    .sort((a: any, b: any) => {
+      const at = Number(toBigIntId(a.lastMessageAt ?? a.last_message_at));
+      const bt = Number(toBigIntId(b.lastMessageAt ?? b.last_message_at));
+      return bt - at;
+    });
+}
+
+export function getOtherDmParticipant(threadId: any, myUserId: any, members: any[], users: any[]) {
+  const tid = toBigIntId(threadId);
+  const mine = toBigIntId(myUserId);
+  const otherMember = members.find((m: any) =>
+    toBigIntId(m.threadId ?? m.thread_id) === tid && toBigIntId(m.userId ?? m.user_id) !== mine
+  );
+  if (!otherMember) return null;
+  const otherId = toBigIntId(otherMember.userId ?? otherMember.user_id);
+  return users.find((u: any) => toBigIntId(u.id) === otherId) ?? null;
 }

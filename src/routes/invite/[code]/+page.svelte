@@ -44,6 +44,11 @@
   }
 
   async function doJoin() {
+    if (!code) {
+      status = 'error';
+      errorMsg = 'Invalid invite code';
+      return;
+    }
     status = 'joining';
     try {
       await joinServer(code);

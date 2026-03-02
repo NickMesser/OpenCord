@@ -12,8 +12,11 @@ import {
 
 export default __t.row({
   id: __t.u64().primaryKey(),
-  channelId: __t.u64().name("channel_id"),
+  threadId: __t.u64().name("thread_id"),
   senderId: __t.u64().name("sender_id"),
-  content: __t.string(),
+  receiverId: __t.u64().name("receiver_id"),
+  senderEphemeralPubkey: __t.byteArray().name("sender_ephemeral_pubkey"),
+  nonce: __t.byteArray(),
+  ciphertext: __t.byteArray(),
   sentAt: __t.timestamp().name("sent_at"),
 });

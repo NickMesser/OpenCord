@@ -36,6 +36,8 @@ pub struct UserAccount {
     pub display_name: String,
     pub avatar_url: String,
     pub created_at: Timestamp,
+    #[default(None::<Vec<u8>>)]
+    pub public_encryption_key: Option<Vec<u8>>,
 }
 
 #[spacetimedb::table(accessor = user_session, public)]
@@ -178,6 +180,81 @@ pub struct VideoFrameEvent {
     pub jpeg: Vec<u8>,
 }
 
+#[spacetimedb::table(accessor = dm_thread, public)]
+#[derive(Clone)]
+pub struct DmThread {
+    #[primary_key]
+    #[auto_inc]
+    pub id: u64,
+    #[unique]
+    pub pair_key: String,
+    pub user_low_id: u64,
+    pub user_high_id: u64,
+    pub created_at: Timestamp,
+    pub last_message_at: Timestamp,
+}
+
+#[spacetimedb::table(accessor = dm_member, public)]
+#[derive(Clone)]
+pub struct DmMember {
+    #[primary_key]
+    #[auto_inc]
+    pub id: u64,
+    pub thread_id: u64,
+    pub user_id: u64,
+    pub joined_at: Timestamp,
+}
+
+#[spacetimedb::table(accessor = dm_message, public)]
+#[derive(Clone)]
+pub struct DmMessage {
+    #[primary_key]
+    #[auto_inc]
+    pub id: u64,
+    pub thread_id: u64,
+    pub sender_id: u64,
+    pub receiver_id: u64,
+    pub sender_ephemeral_pubkey: Vec<u8>,
+    pub nonce: Vec<u8>,
+    pub ciphertext: Vec<u8>,
+    pub sent_at: Timestamp,
+}
+
+#[spacetimedb::table(accessor = dm_call_member, public)]
+#[derive(Clone)]
+pub struct DmCallMember {
+    #[primary_key]
+    #[auto_inc]
+    pub id: u64,
+    pub thread_id: u64,
+    pub user_id: u64,
+    pub identity: Identity,
+    pub joined_at: Timestamp,
+}
+
+#[spacetimedb::table(accessor = dm_audio_frame_event, public, event)]
+#[derive(Clone)]
+pub struct DmAudioFrameEvent {
+    pub thread_id: u64,
+    pub from: Identity,
+    pub seq: u32,
+    pub sample_rate: u32,
+    pub channels: u8,
+    pub rms: f32,
+    pub pcm16le: Vec<u8>,
+}
+
+#[spacetimedb::table(accessor = dm_video_frame_event, public, event)]
+#[derive(Clone)]
+pub struct DmVideoFrameEvent {
+    pub thread_id: u64,
+    pub from: Identity,
+    pub seq: u32,
+    pub width: u16,
+    pub height: u16,
+    pub jpeg: Vec<u8>,
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -253,6 +330,34 @@ fn default_channel_media_settings(channel_id: u64) -> ChannelMediaSettings {
         video_jpeg_quality: 0.55,
         video_max_frame_bytes: 512000,
     }
+}
+
+fn dm_pair_key(a: u64, b: u64) -> Result<(u64, u64, String), String> {
+    if a == b {
+        return Err("Cannot create a DM with yourself".to_string());
+    }
+    let (low, high) = if a < b { (a, b) } else { (b, a) };
+    Ok((low, high, format!("{}:{}", low, high)))
+}
+
+fn get_dm_thread(ctx: &ReducerContext, thread_id: u64) -> Result<DmThread, String> {
+    ctx.db
+        .dm_thread()
+        .id()
+        .find(&thread_id)
+        .ok_or_else(|| "DM thread not found".to_string())
+}
+
+fn ensure_dm_member(ctx: &ReducerContext, thread_id: u64, user_id: u64) -> Result<(), String> {
+    let is_member = ctx
+        .db
+        .dm_member()
+        .iter()
+        .any(|m| m.thread_id == thread_id && m.user_id == user_id);
+    if !is_member {
+        return Err("You are not a participant in this DM".to_string());
+    }
+    Ok(())
 }
 
 fn get_or_create_channel_media_settings(ctx: &ReducerContext, channel_id: u64) -> ChannelMediaSettings {
@@ -344,6 +449,16 @@ pub fn client_disconnected(ctx: &ReducerContext) {
     for id in ids {
         ctx.db.voice_member().id().delete(&id);
     }
+    let dm_call_ids: Vec<u64> = ctx
+        .db
+        .dm_call_member()
+        .iter()
+        .filter(|m| m.identity == ctx.sender())
+        .map(|m| m.id)
+        .collect();
+    for id in dm_call_ids {
+        ctx.db.dm_call_member().id().delete(&id);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -383,6 +498,7 @@ pub fn register(ctx: &ReducerContext, email: String, password: String, username:
         display_name: username,
         avatar_url: String::new(),
         created_at: now,
+        public_encryption_key: None,
     });
 
     ctx.db.user_session().identity().delete(&ctx.sender());
@@ -424,6 +540,19 @@ pub fn login(ctx: &ReducerContext, email: String, password: String) -> Result<()
 #[spacetimedb::reducer]
 pub fn logout(ctx: &ReducerContext) -> Result<(), String> {
     ctx.db.user_session().identity().delete(&ctx.sender());
+    Ok(())
+}
+
+#[spacetimedb::reducer]
+pub fn set_public_encryption_key(ctx: &ReducerContext, public_encryption_key: Vec<u8>) -> Result<(), String> {
+    if public_encryption_key.len() != 65 {
+        return Err("Public encryption key must be 65 bytes".to_string());
+    }
+    let caller = get_caller(ctx)?;
+    ctx.db.user_account().id().update(UserAccount {
+        public_encryption_key: Some(public_encryption_key),
+        ..caller
+    });
     Ok(())
 }
 
@@ -954,5 +1083,235 @@ pub fn delete_message(ctx: &ReducerContext, message_id: u64) -> Result<(), Strin
     }
 
     ctx.db.channel_message().id().delete(&message_id);
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Private DM Reducers
+// ---------------------------------------------------------------------------
+
+#[spacetimedb::reducer]
+pub fn open_dm_thread(ctx: &ReducerContext, target_user_id: u64) -> Result<(), String> {
+    let caller = get_caller(ctx)?;
+    let _target = ctx
+        .db
+        .user_account()
+        .id()
+        .find(&target_user_id)
+        .ok_or_else(|| "Target user not found".to_string())?;
+
+    let (low, high, pair_key) = dm_pair_key(caller.id, target_user_id)?;
+    if ctx.db.dm_thread().pair_key().find(&pair_key).is_some() {
+        return Ok(());
+    }
+
+    let now = ctx.timestamp;
+    let thread = ctx.db.dm_thread().insert(DmThread {
+        id: 0,
+        pair_key,
+        user_low_id: low,
+        user_high_id: high,
+        created_at: now,
+        last_message_at: now,
+    });
+
+    ctx.db.dm_member().insert(DmMember {
+        id: 0,
+        thread_id: thread.id,
+        user_id: low,
+        joined_at: now,
+    });
+    ctx.db.dm_member().insert(DmMember {
+        id: 0,
+        thread_id: thread.id,
+        user_id: high,
+        joined_at: now,
+    });
+    Ok(())
+}
+
+#[spacetimedb::reducer]
+pub fn send_dm_message(
+    ctx: &ReducerContext,
+    thread_id: u64,
+    receiver_user_id: u64,
+    sender_ephemeral_pubkey: Vec<u8>,
+    nonce: Vec<u8>,
+    ciphertext: Vec<u8>,
+) -> Result<(), String> {
+    let caller = get_caller(ctx)?;
+    let thread = get_dm_thread(ctx, thread_id)?;
+    ensure_dm_member(ctx, thread.id, caller.id)?;
+    ensure_dm_member(ctx, thread.id, receiver_user_id)?;
+
+    if caller.id == receiver_user_id {
+        return Err("Cannot send a DM to yourself".to_string());
+    }
+    if sender_ephemeral_pubkey.len() != 65 {
+        return Err("Sender ephemeral public key must be 65 bytes".to_string());
+    }
+    if nonce.len() != 12 {
+        return Err("Nonce must be 12 bytes".to_string());
+    }
+    if ciphertext.is_empty() {
+        return Err("Ciphertext cannot be empty".to_string());
+    }
+    if ciphertext.len() > 32768 {
+        return Err("Ciphertext too large".to_string());
+    }
+
+    ctx.db.dm_message().insert(DmMessage {
+        id: 0,
+        thread_id: thread.id,
+        sender_id: caller.id,
+        receiver_id: receiver_user_id,
+        sender_ephemeral_pubkey,
+        nonce,
+        ciphertext,
+        sent_at: ctx.timestamp,
+    });
+
+    ctx.db.dm_thread().id().update(DmThread {
+        last_message_at: ctx.timestamp,
+        ..thread
+    });
+    Ok(())
+}
+
+#[spacetimedb::reducer]
+pub fn delete_dm_message(ctx: &ReducerContext, message_id: u64) -> Result<(), String> {
+    let caller = get_caller(ctx)?;
+    let msg = ctx
+        .db
+        .dm_message()
+        .id()
+        .find(&message_id)
+        .ok_or_else(|| "DM message not found".to_string())?;
+    ensure_dm_member(ctx, msg.thread_id, caller.id)?;
+    if msg.sender_id != caller.id {
+        return Err("Only the sender can delete this DM".to_string());
+    }
+    ctx.db.dm_message().id().delete(&message_id);
+    Ok(())
+}
+
+#[spacetimedb::reducer]
+pub fn join_dm_call(ctx: &ReducerContext, thread_id: u64) -> Result<(), String> {
+    let caller = get_caller(ctx)?;
+    get_dm_thread(ctx, thread_id)?;
+    ensure_dm_member(ctx, thread_id, caller.id)?;
+
+    let existing: Vec<u64> = ctx
+        .db
+        .dm_call_member()
+        .iter()
+        .filter(|m| m.identity == ctx.sender())
+        .map(|m| m.id)
+        .collect();
+    for id in existing {
+        ctx.db.dm_call_member().id().delete(&id);
+    }
+
+    ctx.db.dm_call_member().insert(DmCallMember {
+        id: 0,
+        thread_id,
+        user_id: caller.id,
+        identity: ctx.sender(),
+        joined_at: ctx.timestamp,
+    });
+    Ok(())
+}
+
+#[spacetimedb::reducer]
+pub fn leave_dm_call(ctx: &ReducerContext, thread_id: u64) -> Result<(), String> {
+    let ids: Vec<u64> = ctx
+        .db
+        .dm_call_member()
+        .iter()
+        .filter(|m| m.identity == ctx.sender() && m.thread_id == thread_id)
+        .map(|m| m.id)
+        .collect();
+    for id in ids {
+        ctx.db.dm_call_member().id().delete(&id);
+    }
+    Ok(())
+}
+
+#[spacetimedb::reducer]
+pub fn send_dm_audio_frame(
+    ctx: &ReducerContext,
+    thread_id: u64,
+    seq: u32,
+    sample_rate: u32,
+    channels: u8,
+    rms: f32,
+    pcm16le: Vec<u8>,
+) -> Result<(), String> {
+    let who = ctx.sender();
+    let is_in = ctx
+        .db
+        .dm_call_member()
+        .iter()
+        .any(|v| v.identity == who && v.thread_id == thread_id);
+    if !is_in {
+        return Err("Not in DM call".to_string());
+    }
+
+    if !(8000..=48000).contains(&sample_rate) {
+        return Err("Audio sample rate must be 8000-48000".to_string());
+    }
+    if channels == 0 || channels > 2 {
+        return Err("Invalid channel count".to_string());
+    }
+    if pcm16le.len() > 64000 {
+        return Err("Audio frame too large".to_string());
+    }
+
+    ctx.db.dm_audio_frame_event().insert(DmAudioFrameEvent {
+        thread_id,
+        from: who,
+        seq,
+        sample_rate,
+        channels,
+        rms,
+        pcm16le,
+    });
+    Ok(())
+}
+
+#[spacetimedb::reducer]
+pub fn send_dm_video_frame(
+    ctx: &ReducerContext,
+    thread_id: u64,
+    seq: u32,
+    width: u16,
+    height: u16,
+    jpeg: Vec<u8>,
+) -> Result<(), String> {
+    let who = ctx.sender();
+    let is_in = ctx
+        .db
+        .dm_call_member()
+        .iter()
+        .any(|v| v.identity == who && v.thread_id == thread_id);
+    if !is_in {
+        return Err("Not in DM call".to_string());
+    }
+
+    if width == 0 || height == 0 {
+        return Err("Video size must be > 0".to_string());
+    }
+    if jpeg.is_empty() || jpeg.len() > 700000 {
+        return Err("Video frame too large".to_string());
+    }
+
+    ctx.db.dm_video_frame_event().insert(DmVideoFrameEvent {
+        thread_id,
+        from: who,
+        seq,
+        width,
+        height,
+        jpeg,
+    });
     Ok(())
 }

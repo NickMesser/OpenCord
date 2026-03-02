@@ -11,9 +11,10 @@ import {
 } from "spacetimedb";
 
 export default __t.row({
-  id: __t.u64().primaryKey(),
-  channelId: __t.u64().name("channel_id"),
-  senderId: __t.u64().name("sender_id"),
-  content: __t.string(),
-  sentAt: __t.timestamp().name("sent_at"),
+  threadId: __t.u64().name("thread_id"),
+  from: __t.identity(),
+  seq: __t.u32(),
+  width: __t.u16(),
+  height: __t.u16(),
+  jpeg: __t.byteArray(),
 });

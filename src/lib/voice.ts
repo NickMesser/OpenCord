@@ -3,9 +3,13 @@ import {
   channelMediaSettingsStore,
   identityStore,
   joinVoiceChannel,
+  joinDmCall,
   leaveVoiceChannel,
+  leaveDmCall,
   onEventInsert,
   sendAudioFrame,
+  sendDmAudioFrame,
+  sendDmVideoFrame,
   sendVideoFrame,
   idEq
 } from '$lib/stdb';
@@ -72,6 +76,19 @@ export const audioControlStore = writable({
   inputGain: 1,
   outputGain: 1,
 });
+
+export const dmCallState = writable({
+  threadId: null as bigint | null,
+  joined: false,
+  connecting: false,
+  error: null as string | null,
+  videoEnabled: false,
+  screenSharing: false,
+});
+
+export const dmAudioLevelsStore = writable<Record<string, { rms: number; at: number }>>({});
+export const dmRemoteVideoFramesStore = writable<Record<string, string>>({});
+export const dmLocalVideoStreamStore = writable<MediaStream | null>(null);
 
 let handlersAttached = false;
 let activeChannelId: bigint | null = null;
@@ -267,7 +284,7 @@ function handleVideoFrame(row: any) {
   const jpeg: Uint8Array = row.jpeg ?? row.bytes ?? new Uint8Array();
   if (!jpeg || jpeg.byteLength === 0) return;
 
-  const blob = new Blob([jpeg], { type: 'image/jpeg' });
+  const blob = new Blob([jpeg as unknown as BlobPart], { type: 'image/jpeg' });
   const url = URL.createObjectURL(blob);
   const prev = videoUrlMap.get(idHex);
   if (prev) URL.revokeObjectURL(prev);
@@ -384,8 +401,10 @@ async function startVideoCapture(settings: ChannelSettings) {
       blob.arrayBuffer().then((buf) => {
         const bytes = new Uint8Array(buf);
         if (bytes.byteLength > settings.videoMaxFrameBytes) return;
+        const targetChannelId = activeChannelId;
+        if (!targetChannelId) return;
         sendVideoFrame({
-          channelId: activeChannelId,
+          channelId: targetChannelId,
           seq: seq++,
           width: settings.videoWidth,
           height: settings.videoHeight,
@@ -445,8 +464,10 @@ async function startScreenShare(settings: ChannelSettings, quality: ScreenShareQ
       blob.arrayBuffer().then((buf) => {
         const bytes = new Uint8Array(buf);
         if (bytes.byteLength > preset.maxFrameBytes) return;
+        const targetChannelId = activeChannelId;
+        if (!targetChannelId) return;
         sendVideoFrame({
-          channelId: activeChannelId,
+          channelId: targetChannelId,
           seq: seq++,
           width: preset.width,
           height: preset.height,
@@ -468,6 +489,9 @@ function stopScreenShare() {
 
 export async function joinVoice(channelId: bigint, opts: { video?: boolean } = {}) {
   if (get(voiceState).connecting) return;
+  if (get(dmCallState).joined || get(dmCallState).connecting) {
+    await leaveDmVoice();
+  }
   const current = get(voiceState);
   if (current.joined && current.channelId && !idEq(current.channelId, channelId)) {
     await leaveVoice();
@@ -569,6 +593,7 @@ export function setInputGain(value: number) {
 export function setOutputGain(value: number) {
   outputGainValue = clamp(value, 0, 2);
   if (playbackGain) playbackGain.gain.value = outputGainValue;
+  if (dmPlaybackGain) dmPlaybackGain.gain.value = outputGainValue;
   audioControlStore.update((s) => ({ ...s, outputGain: outputGainValue }));
 }
 
@@ -582,4 +607,335 @@ export function toggleDeafen() {
   isDeafened = !isDeafened;
   playSfx(isDeafened ? 'deafen' : 'undeafen');
   audioControlStore.update((s) => ({ ...s, deafened: isDeafened }));
+}
+
+let dmHandlersAttached = false;
+let dmActiveThreadId: bigint | null = null;
+let dmSeq = 0;
+let dmCaptureCtx: AudioContext | null = null;
+let dmPlaybackCtx: AudioContext | null = null;
+let dmPlaybackGain: GainNode | null = null;
+let dmMicStream: MediaStream | null = null;
+let dmProcessor: ScriptProcessorNode | null = null;
+let dmFrameBuffer: number[] = [];
+const dmPlaybackState = new Map<string, { nextTime: number }>();
+let dmVideoStream: MediaStream | null = null;
+let dmVideoTimer: number | null = null;
+let dmScreenStream: MediaStream | null = null;
+let dmScreenTimer: number | null = null;
+let dmVideoUrlMap = new Map<string, string>();
+
+function ensureDmEventHandlers() {
+  if (dmHandlersAttached) return;
+  dmHandlersAttached = true;
+  onEventInsert('dm_audio_frame_event', handleDmAudioFrame);
+  onEventInsert('dm_video_frame_event', handleDmVideoFrame);
+}
+
+function handleDmAudioFrame(row: any) {
+  if (isDeafened) return;
+  if (!dmActiveThreadId || !idEq(row.threadId ?? row.thread_id, dmActiveThreadId)) return;
+  const me = get(identityStore);
+  if (me && identityHex(row.from) === identityHex(me)) return;
+
+  const idHex = identityHex(row.from);
+  dmAudioLevelsStore.update((levels) => ({
+    ...levels,
+    [idHex]: { rms: Number(row.rms ?? 0), at: Date.now() },
+  }));
+
+  const pcm: Uint8Array = row.pcm16le ?? new Uint8Array();
+  if (!pcm || pcm.byteLength === 0) return;
+  const channels = Number(row.channels ?? 1);
+  const sampleRate = Number(row.sampleRate ?? row.sample_rate ?? 16000);
+  const int16 = new Int16Array(pcm.buffer, pcm.byteOffset, Math.floor(pcm.byteLength / 2));
+  const frameLength = Math.floor(int16.length / channels);
+  if (frameLength <= 0) return;
+
+  if (!dmPlaybackCtx) {
+    dmPlaybackCtx = new AudioContext({ sampleRate });
+    dmPlaybackGain = dmPlaybackCtx.createGain();
+    dmPlaybackGain.gain.value = outputGainValue;
+    dmPlaybackGain.connect(dmPlaybackCtx.destination);
+  }
+  if (dmPlaybackCtx.state === 'suspended') {
+    dmPlaybackCtx.resume().catch(() => undefined);
+  }
+
+  const buffer = dmPlaybackCtx.createBuffer(channels, frameLength, sampleRate);
+  for (let ch = 0; ch < channels; ch++) {
+    const out = buffer.getChannelData(ch);
+    for (let i = 0; i < frameLength; i++) {
+      const sample = int16[i * channels + ch];
+      out[i] = sample < 0 ? sample / 0x8000 : sample / 0x7fff;
+    }
+  }
+
+  const state = dmPlaybackState.get(idHex) ?? { nextTime: dmPlaybackCtx.currentTime };
+  const startTime = Math.max(dmPlaybackCtx.currentTime, state.nextTime);
+  const source = dmPlaybackCtx.createBufferSource();
+  source.buffer = buffer;
+  if (dmPlaybackGain) source.connect(dmPlaybackGain);
+  else source.connect(dmPlaybackCtx.destination);
+  source.start(startTime);
+  state.nextTime = startTime + buffer.duration;
+  dmPlaybackState.set(idHex, state);
+}
+
+function handleDmVideoFrame(row: any) {
+  if (!dmActiveThreadId || !idEq(row.threadId ?? row.thread_id, dmActiveThreadId)) return;
+  const me = get(identityStore);
+  if (me && identityHex(row.from) === identityHex(me)) return;
+  const idHex = identityHex(row.from);
+  const jpeg: Uint8Array = row.jpeg ?? new Uint8Array();
+  if (!jpeg || jpeg.byteLength === 0) return;
+  const blob = new Blob([jpeg as unknown as BlobPart], { type: 'image/jpeg' });
+  const url = URL.createObjectURL(blob);
+  const prev = dmVideoUrlMap.get(idHex);
+  if (prev) URL.revokeObjectURL(prev);
+  dmVideoUrlMap.set(idHex, url);
+  dmRemoteVideoFramesStore.update((frames) => ({ ...frames, [idHex]: url }));
+}
+
+async function startDmAudioCapture(sampleRate = 16000, frameMs = 50) {
+  if (dmCaptureCtx) return;
+  dmCaptureCtx = new AudioContext({ sampleRate });
+  dmMicStream = await navigator.mediaDevices.getUserMedia({
+    audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+    video: false,
+  });
+  const source = dmCaptureCtx.createMediaStreamSource(dmMicStream);
+  dmProcessor = dmCaptureCtx.createScriptProcessor(4096, 1, 1);
+  source.connect(dmProcessor);
+  dmProcessor.connect(dmCaptureCtx.destination);
+
+  const frameSize = Math.floor(sampleRate * (frameMs / 1000));
+  dmFrameBuffer = [];
+  dmSeq = 0;
+
+  dmProcessor.onaudioprocess = (e) => {
+    if (!dmActiveThreadId) return;
+    const input = e.inputBuffer.getChannelData(0);
+    for (let i = 0; i < input.length; i++) dmFrameBuffer.push(input[i]);
+    while (dmFrameBuffer.length >= frameSize) {
+      const frame = dmFrameBuffer.slice(0, frameSize);
+      dmFrameBuffer = dmFrameBuffer.slice(frameSize);
+      if (isMuted || isDeafened) continue;
+
+      let sum = 0;
+      const pcm = new Int16Array(frame.length);
+      for (let i = 0; i < frame.length; i++) {
+        const s = clamp(frame[i] * inputGainValue, -1, 1);
+        sum += s * s;
+        pcm[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
+      }
+      const rms = Math.sqrt(sum / frame.length);
+      const me = get(identityStore);
+      if (me) {
+        const meHex = identityHex(me);
+        dmAudioLevelsStore.update((levels) => ({ ...levels, [meHex]: { rms, at: Date.now() } }));
+      }
+      sendDmAudioFrame({
+        threadId: dmActiveThreadId,
+        seq: dmSeq++,
+        sampleRate,
+        channels: 1,
+        rms,
+        pcm16le: new Uint8Array(pcm.buffer),
+      }).catch(() => undefined);
+    }
+  };
+}
+
+function stopDmAudioCapture() {
+  if (dmProcessor) {
+    dmProcessor.disconnect();
+    dmProcessor.onaudioprocess = null;
+  }
+  if (dmMicStream) dmMicStream.getTracks().forEach((t) => t.stop());
+  if (dmCaptureCtx) dmCaptureCtx.close().catch(() => undefined);
+  dmProcessor = null;
+  dmMicStream = null;
+  dmCaptureCtx = null;
+  dmFrameBuffer = [];
+}
+
+async function startDmVideoCapture(width = 320, height = 180, fps = 8, quality = 0.55, maxBytes = 512000) {
+  if (dmVideoStream) return;
+  dmVideoStream = await navigator.mediaDevices.getUserMedia({
+    video: { width, height, frameRate: fps },
+    audio: false,
+  });
+  dmLocalVideoStreamStore.set(dmVideoStream);
+  const videoEl = document.createElement('video');
+  videoEl.srcObject = dmVideoStream;
+  videoEl.muted = true;
+  videoEl.playsInline = true;
+  await videoEl.play();
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return;
+  const intervalMs = Math.max(100, Math.floor(1000 / fps));
+  dmVideoTimer = window.setInterval(() => {
+    if (!dmActiveThreadId || !dmVideoStream) return;
+    ctx.drawImage(videoEl, 0, 0, canvas.width, canvas.height);
+    canvas.toBlob((blob) => {
+      if (!blob || !dmActiveThreadId) return;
+      blob.arrayBuffer().then((buf) => {
+        const bytes = new Uint8Array(buf);
+        if (bytes.byteLength > maxBytes) return;
+        const targetThreadId = dmActiveThreadId;
+        if (!targetThreadId) return;
+        sendDmVideoFrame({
+          threadId: targetThreadId,
+          seq: dmSeq++,
+          width,
+          height,
+          jpeg: bytes,
+        }).catch(() => undefined);
+      }).catch(() => undefined);
+    }, 'image/jpeg', quality);
+  }, intervalMs);
+}
+
+function stopDmVideoCapture() {
+  if (dmVideoTimer) window.clearInterval(dmVideoTimer);
+  if (dmVideoStream) dmVideoStream.getTracks().forEach((t) => t.stop());
+  dmVideoTimer = null;
+  dmVideoStream = null;
+  dmLocalVideoStreamStore.set(null);
+}
+
+async function startDmScreenShare(quality: ScreenShareQuality = 'medium') {
+  if (dmScreenStream) return;
+  const preset = screenSharePresets[quality] ?? screenSharePresets.medium;
+  dmScreenStream = await navigator.mediaDevices.getDisplayMedia({
+    video: { width: preset.width, height: preset.height, frameRate: preset.fps },
+    audio: false,
+  });
+  dmLocalVideoStreamStore.set(dmScreenStream);
+  const track = dmScreenStream.getVideoTracks()[0];
+  if (track) {
+    track.onended = () => {
+      stopDmScreenShare();
+    };
+  }
+  const videoEl = document.createElement('video');
+  videoEl.srcObject = dmScreenStream;
+  videoEl.muted = true;
+  videoEl.playsInline = true;
+  await videoEl.play();
+  const canvas = document.createElement('canvas');
+  canvas.width = preset.width;
+  canvas.height = preset.height;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return;
+  const intervalMs = Math.max(100, Math.floor(1000 / preset.fps));
+  dmScreenTimer = window.setInterval(() => {
+    if (!dmActiveThreadId || !dmScreenStream) return;
+    ctx.drawImage(videoEl, 0, 0, canvas.width, canvas.height);
+    canvas.toBlob((blob) => {
+      if (!blob || !dmActiveThreadId) return;
+      blob.arrayBuffer().then((buf) => {
+        const bytes = new Uint8Array(buf);
+        if (bytes.byteLength > preset.maxFrameBytes) return;
+        const targetThreadId = dmActiveThreadId;
+        if (!targetThreadId) return;
+        sendDmVideoFrame({
+          threadId: targetThreadId,
+          seq: dmSeq++,
+          width: preset.width,
+          height: preset.height,
+          jpeg: bytes,
+        }).catch(() => undefined);
+      }).catch(() => undefined);
+    }, 'image/jpeg', preset.jpegQuality);
+  }, intervalMs);
+}
+
+function stopDmScreenShare() {
+  if (dmScreenTimer) window.clearInterval(dmScreenTimer);
+  if (dmScreenStream) dmScreenStream.getTracks().forEach((t) => t.stop());
+  dmScreenTimer = null;
+  dmScreenStream = null;
+  dmLocalVideoStreamStore.set(dmVideoStream ?? null);
+  dmCallState.update((s) => ({ ...s, screenSharing: false }));
+}
+
+export async function joinDmVoice(threadId: bigint) {
+  if (get(dmCallState).connecting) return;
+  if (get(voiceState).joined || get(voiceState).connecting) {
+    await leaveVoice();
+  }
+  dmCallState.update((s) => ({ ...s, connecting: true, error: null }));
+  try {
+    await joinDmCall(threadId);
+    dmActiveThreadId = threadId;
+    ensureDmEventHandlers();
+    await startDmAudioCapture();
+    playSfx('join');
+    dmCallState.set({
+      threadId,
+      joined: true,
+      connecting: false,
+      error: null,
+      videoEnabled: false,
+      screenSharing: false,
+    });
+  } catch (e: any) {
+    dmCallState.update((s) => ({ ...s, connecting: false, error: e?.message ?? String(e) }));
+  }
+}
+
+export async function leaveDmVoice() {
+  const threadId = dmActiveThreadId;
+  dmActiveThreadId = null;
+  stopDmAudioCapture();
+  stopDmVideoCapture();
+  stopDmScreenShare();
+  dmPlaybackState.clear();
+  dmCallState.set({
+    threadId: null,
+    joined: false,
+    connecting: false,
+    error: null,
+    videoEnabled: false,
+    screenSharing: false,
+  });
+  dmAudioLevelsStore.set({});
+  dmRemoteVideoFramesStore.set({});
+  for (const url of dmVideoUrlMap.values()) URL.revokeObjectURL(url);
+  dmVideoUrlMap.clear();
+  if (threadId) await leaveDmCall(threadId);
+  playSfx('leave');
+}
+
+export async function setDmVideoEnabled(enable: boolean) {
+  if (!dmActiveThreadId) return;
+  if (enable) {
+    stopDmScreenShare();
+    await startDmVideoCapture();
+  } else {
+    stopDmVideoCapture();
+  }
+  dmCallState.update((s) => ({ ...s, videoEnabled: enable }));
+}
+
+export async function setDmScreenShareEnabled(enable: boolean, quality: ScreenShareQuality = 'medium') {
+  if (!dmActiveThreadId) return;
+  if (enable) {
+    stopDmVideoCapture();
+    dmCallState.update((s) => ({ ...s, videoEnabled: false, error: null }));
+    try {
+      await startDmScreenShare(quality);
+      dmCallState.update((s) => ({ ...s, screenSharing: true }));
+    } catch (e: any) {
+      dmCallState.update((s) => ({ ...s, error: e?.message ?? String(e), screenSharing: false }));
+      stopDmScreenShare();
+    }
+  } else {
+    stopDmScreenShare();
+  }
 }
