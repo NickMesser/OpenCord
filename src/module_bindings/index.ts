@@ -41,6 +41,7 @@ import CreateServerReducer from "./create_server_reducer";
 import DeleteCategoryReducer from "./delete_category_reducer";
 import DeleteChannelReducer from "./delete_channel_reducer";
 import DeleteDmMessageReducer from "./delete_dm_message_reducer";
+import DeleteFileReducer from "./delete_file_reducer";
 import DeleteMessageReducer from "./delete_message_reducer";
 import DeleteServerReducer from "./delete_server_reducer";
 import JoinDmCallReducer from "./join_dm_call_reducer";
@@ -53,6 +54,7 @@ import LoginReducer from "./login_reducer";
 import LogoutReducer from "./logout_reducer";
 import OpenDmThreadReducer from "./open_dm_thread_reducer";
 import RegisterReducer from "./register_reducer";
+import RemoveAvatarReducer from "./remove_avatar_reducer";
 import SendAudioFrameReducer from "./send_audio_frame_reducer";
 import SendChannelMessageReducer from "./send_channel_message_reducer";
 import SendDmAudioFrameReducer from "./send_dm_audio_frame_reducer";
@@ -61,6 +63,9 @@ import SendDmVideoFrameReducer from "./send_dm_video_frame_reducer";
 import SendVideoFrameReducer from "./send_video_frame_reducer";
 import SetChannelMediaSettingsReducer from "./set_channel_media_settings_reducer";
 import SetPublicEncryptionKeyReducer from "./set_public_encryption_key_reducer";
+import UpdateAvatarReducer from "./update_avatar_reducer";
+import UpdateProfileReducer from "./update_profile_reducer";
+import UploadFileReducer from "./upload_file_reducer";
 
 // Import all procedure arg schemas
 
@@ -76,6 +81,7 @@ import DmMemberRow from "./dm_member_table";
 import DmMessageRow from "./dm_message_table";
 import DmThreadRow from "./dm_thread_table";
 import DmVideoFrameEventRow from "./dm_video_frame_event_table";
+import FileUploadRow from "./file_upload_table";
 import InviteLinkRow from "./invite_link_table";
 import ServerRow from "./server_table";
 import ServerMemberRow from "./server_member_table";
@@ -204,6 +210,17 @@ const tablesSchema = __schema({
     ],
     event: true,
   }, DmVideoFrameEventRow),
+  file_upload: __table({
+    name: 'file_upload',
+    indexes: [
+      { name: 'id', algorithm: 'btree', columns: [
+        'id',
+      ] },
+    ],
+    constraints: [
+      { name: 'file_upload_id_key', constraint: 'unique', columns: ['id'] },
+    ],
+  }, FileUploadRow),
   invite_link: __table({
     name: 'invite_link',
     indexes: [
@@ -301,6 +318,7 @@ const reducersSchema = __reducers(
   __reducerSchema("delete_category", DeleteCategoryReducer),
   __reducerSchema("delete_channel", DeleteChannelReducer),
   __reducerSchema("delete_dm_message", DeleteDmMessageReducer),
+  __reducerSchema("delete_file", DeleteFileReducer),
   __reducerSchema("delete_message", DeleteMessageReducer),
   __reducerSchema("delete_server", DeleteServerReducer),
   __reducerSchema("join_dm_call", JoinDmCallReducer),
@@ -313,6 +331,7 @@ const reducersSchema = __reducers(
   __reducerSchema("logout", LogoutReducer),
   __reducerSchema("open_dm_thread", OpenDmThreadReducer),
   __reducerSchema("register", RegisterReducer),
+  __reducerSchema("remove_avatar", RemoveAvatarReducer),
   __reducerSchema("send_audio_frame", SendAudioFrameReducer),
   __reducerSchema("send_channel_message", SendChannelMessageReducer),
   __reducerSchema("send_dm_audio_frame", SendDmAudioFrameReducer),
@@ -321,6 +340,9 @@ const reducersSchema = __reducers(
   __reducerSchema("send_video_frame", SendVideoFrameReducer),
   __reducerSchema("set_channel_media_settings", SetChannelMediaSettingsReducer),
   __reducerSchema("set_public_encryption_key", SetPublicEncryptionKeyReducer),
+  __reducerSchema("update_avatar", UpdateAvatarReducer),
+  __reducerSchema("update_profile", UpdateProfileReducer),
+  __reducerSchema("upload_file", UploadFileReducer),
 );
 
 /** The schema information for all procedures in this module. This is defined the same way as the procedures would have been defined in the server. */

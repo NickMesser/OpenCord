@@ -134,6 +134,17 @@ export const DmVideoFrameEvent = __t.object("DmVideoFrameEvent", {
 });
 export type DmVideoFrameEvent = __Infer<typeof DmVideoFrameEvent>;
 
+export const FileUpload = __t.object("FileUpload", {
+  id: __t.u64(),
+  uploaderId: __t.u64(),
+  filename: __t.string(),
+  contentType: __t.string(),
+  data: __t.byteArray(),
+  size: __t.u64(),
+  uploadedAt: __t.timestamp(),
+});
+export type FileUpload = __Infer<typeof FileUpload>;
+
 export const InviteLink = __t.object("InviteLink", {
   id: __t.u64(),
   serverId: __t.u64(),
@@ -182,6 +193,8 @@ export const UserAccount = __t.object("UserAccount", {
   avatarUrl: __t.string(),
   createdAt: __t.timestamp(),
   publicEncryptionKey: __t.option(__t.byteArray()),
+  status: __t.option(__t.string()),
+  avatarFileId: __t.u64(),
 });
 export type UserAccount = __Infer<typeof UserAccount>;
 

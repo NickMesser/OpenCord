@@ -19,4 +19,6 @@ export default __t.row({
   avatarUrl: __t.string().name("avatar_url"),
   createdAt: __t.timestamp().name("created_at"),
   publicEncryptionKey: __t.option(__t.byteArray()).name("public_encryption_key"),
+  status: __t.option(__t.string()),
+  avatarFileId: __t.u64().name("avatar_file_id"),
 });
