@@ -28,6 +28,7 @@
   let messageText = $state('');
   let messagesEl: HTMLDivElement | null = $state(null);
   let decrypting = false;
+  let pendingRefresh = false;
   let decryptedMap = $state<Record<string, string>>({});
 
   let threadId = $derived($page.params.threadId);
@@ -68,21 +69,26 @@
   }
 
   async function refreshDecrypted() {
-    if (!$currentUser || decrypting) return;
+    if (!$currentUser) return;
+    if (decrypting) { pendingRefresh = true; return; }
     decrypting = true;
     try {
       const next: Record<string, string> = {};
       const myId = toBig($currentUser.id);
+      const otherUser = other;
       for (const msg of messages) {
         const key = msg.id?.toString?.() ?? '';
         if (!key) continue;
+        const isOwn = idEq(msg.senderId ?? msg.sender_id, myId);
+        let peerPubkey: Uint8Array;
+        if (isOwn && otherUser) {
+          peerPubkey = bytesFromAny(otherUser.publicEncryptionKey ?? otherUser.public_encryption_key);
+        } else {
+          peerPubkey = bytesFromAny(msg.senderEphemeralPubkey ?? msg.sender_ephemeral_pubkey);
+        }
+        if (peerPubkey.length === 0) { next[key] = '[Unable to decrypt]'; continue; }
         try {
-          const plain = await decryptDmPayload(
-            myId,
-            bytesFromAny(msg.senderEphemeralPubkey ?? msg.sender_ephemeral_pubkey),
-            bytesFromAny(msg.nonce),
-            bytesFromAny(msg.ciphertext)
-          );
+          const plain = await decryptDmPayload(myId, peerPubkey, bytesFromAny(msg.nonce), bytesFromAny(msg.ciphertext));
           next[key] = plain;
         } catch {
           next[key] = '[Unable to decrypt]';
@@ -93,12 +99,21 @@
       if (messagesEl) messagesEl.scrollTop = messagesEl.scrollHeight;
     } finally {
       decrypting = false;
+      if (pendingRefresh) {
+        pendingRefresh = false;
+        void refreshDecrypted();
+      }
     }
   }
 
   $effect(() => {
     if ($currentUser && threadIdBig > 0n) {
       void ensureMyKeyPublished();
+    }
+  });
+
+  $effect(() => {
+    if ($currentUser && messages.length >= 0) {
       void refreshDecrypted();
     }
   });
@@ -130,13 +145,28 @@
     else await joinDmVoice(threadIdBig);
   }
 
-  function formatTime(ts: any): string {
+  function tsToDate(ts: any): Date | null {
+    if (!ts) return null;
     try {
-      const n = typeof ts === 'bigint' ? Number(ts / 1000n) : Number(ts) / 1000;
-      return new Date(n).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    } catch {
-      return '';
-    }
+      if (typeof ts === 'object' && typeof ts.toDate === 'function') return ts.toDate();
+      const micros = ts.microsSinceUnixEpoch ?? ts.__timestamp_micros_since_unix_epoch__;
+      if (typeof micros === 'bigint') return new Date(Number(micros / 1000n));
+      const ms = typeof ts === 'bigint' ? Number(ts / 1000n) : Number(ts) / 1000;
+      const d = new Date(ms);
+      return isNaN(d.getTime()) ? null : d;
+    } catch { return null; }
+  }
+
+  function formatTime(ts: any): string {
+    const d = tsToDate(ts);
+    if (!d) return '';
+    try {
+      const now = new Date();
+      if (d.toDateString() === now.toDateString()) {
+        return 'Today at ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      }
+      return d.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    } catch { return ''; }
   }
 </script>
 

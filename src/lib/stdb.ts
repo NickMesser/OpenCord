@@ -2,6 +2,7 @@ import { browser } from '$app/environment';
 import { writable, derived, get } from 'svelte/store';
 import { DbConnection } from '../module_bindings';
 import type { Identity } from 'spacetimedb';
+import { initNotifications, sendNativeNotification } from './notifications';
 
 export const connStore = writable<DbConnection | null>(null);
 export const identityStore = writable<Identity | null>(null);
@@ -209,6 +210,44 @@ function attachCallbacks(conn: DbConnection) {
   bind('dm_call_member', dmCallMembersStore, upsertById, removeById);
   bind('file_upload', fileUploadsStore, upsertById, removeById);
   bind('message_reaction', messageReactionsStore, upsertById, removeById);
+
+  // Native notifications for incoming messages (Tauri desktop only)
+  const msgTable = getTable(conn, 'channel_message');
+  if (msgTable) {
+    msgTable.onInsert(safe('channel_message.notify', (_e: any, row: any) => {
+      const myIdentity = get(identityStore);
+      if (!myIdentity) return;
+      const sessions = get(userSessionsStore);
+      const mySession = sessions.find((s: any) => (s.identity?.toHexString?.() ?? '') === myIdentity.toHexString());
+      if (!mySession) return;
+      const myUserId = toBigIntId(mySession.userId ?? mySession.user_id);
+      if (toBigIntId(row.senderId ?? row.sender_id) === myUserId) return;
+
+      const users = get(userAccountsStore);
+      const sender = users.find((u: any) => toBigIntId(u.id) === toBigIntId(row.senderId ?? row.sender_id));
+      const senderName = sender?.displayName ?? sender?.display_name ?? sender?.username ?? 'Someone';
+      const content = row.content ?? '';
+      sendNativeNotification(senderName, content.length > 200 ? content.slice(0, 200) + '...' : content);
+    }));
+  }
+
+  const dmTable = getTable(conn, 'dm_message');
+  if (dmTable) {
+    dmTable.onInsert(safe('dm_message.notify', (_e: any, row: any) => {
+      const myIdentity = get(identityStore);
+      if (!myIdentity) return;
+      const sessions = get(userSessionsStore);
+      const mySession = sessions.find((s: any) => (s.identity?.toHexString?.() ?? '') === myIdentity.toHexString());
+      if (!mySession) return;
+      const myUserId = toBigIntId(mySession.userId ?? mySession.user_id);
+      if (toBigIntId(row.senderUserId ?? row.sender_user_id) === myUserId) return;
+
+      const users = get(userAccountsStore);
+      const sender = users.find((u: any) => toBigIntId(u.id) === toBigIntId(row.senderUserId ?? row.sender_user_id));
+      const senderName = sender?.displayName ?? sender?.display_name ?? sender?.username ?? 'Someone';
+      sendNativeNotification(senderName, 'Sent you a direct message');
+    }));
+  }
 }
 
 function loadInitialData(conn: DbConnection) {
@@ -270,6 +309,7 @@ export function connectStdb() {
       isConnected.set(true);
       connectionError.set(null);
 
+      initNotifications();
       attachCallbacks(conn);
 
       try {

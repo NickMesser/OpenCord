@@ -1,0 +1,47 @@
+{
+  "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
+  "productName": "OpenCord",
+  "version": "0.1.0",
+  "identifier": "com.opencord.app",
+  "build": {
+    "frontendDist": "../build",
+    "devUrl": "http://localhost:5173",
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "OpenCord",
+        "width": 1280,
+        "height": 800,
+        "minWidth": 940,
+        "minHeight": 560,
+        "resizable": true,
+        "fullscreen": false,
+        "decorations": true
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; connect-src 'self' wss://maincloud.spacetimedb.com https:; img-src 'self' https: data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ]
+  },
+  "plugins": {
+    "deep-link": {
+      "desktop": {
+        "schemes": ["opencord"]
+      }
+    }
+  }
+}

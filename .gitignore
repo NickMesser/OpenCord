@@ -10,3 +10,6 @@ spacetime.local.json
 *.log
 .DS_Store
 Thumbs.db
+
+# Tauri generated files
+src-tauri/gen/

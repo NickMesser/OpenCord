@@ -1,9 +1,14 @@
-import adapter from '@sveltejs/adapter-node';
+import adapterNode from '@sveltejs/adapter-node';
+import adapterStatic from '@sveltejs/adapter-static';
+
+const isDesktop = process.env.TAURI_ENV_PLATFORM !== undefined;
 
 /** @type {import('@sveltejs/kit').Config} */
 const config = {
 	kit: {
-		adapter: adapter()
+		adapter: isDesktop
+			? adapterStatic({ fallback: 'index.html' })
+			: adapterNode()
 	}
 };
 

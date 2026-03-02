@@ -84,14 +84,21 @@
     return id?.toString?.() ?? String(id);
   }
 
-  function timestampToMs(ts: any): number {
-    if (!ts) return 0;
+  function tsToDate(ts: any): Date | null {
+    if (!ts) return null;
     try {
-      const v = typeof ts === 'bigint' ? Number(ts / 1000n) : Number(ts) / 1000;
-      return Number.isFinite(v) ? v : 0;
-    } catch {
-      return 0;
-    }
+      if (typeof ts === 'object' && typeof ts.toDate === 'function') return ts.toDate();
+      const micros = ts.microsSinceUnixEpoch ?? ts.__timestamp_micros_since_unix_epoch__;
+      if (typeof micros === 'bigint') return new Date(Number(micros / 1000n));
+      const ms = typeof ts === 'bigint' ? Number(ts / 1000n) : Number(ts) / 1000;
+      const d = new Date(ms);
+      return isNaN(d.getTime()) ? null : d;
+    } catch { return null; }
+  }
+
+  function timestampToMs(ts: any): number {
+    const d = tsToDate(ts);
+    return d ? d.getTime() : 0;
   }
 
   let onlineUserIds = $derived(new Set(($userSessionsStore ?? [])
@@ -173,10 +180,9 @@
   let isInVoice = $derived($voiceState.joined && $voiceState.channelId && idEq($voiceState.channelId, channelIdBig));
 
   function formatTime(ts: any): string {
-    if (!ts) return '';
+    const d = tsToDate(ts);
+    if (!d) return '';
     try {
-      const d = new Date(typeof ts === 'bigint' ? Number(ts / 1000n) : Number(ts) / 1000);
-      if (isNaN(d.getTime())) return '';
       const now = new Date();
       if (d.toDateString() === now.toDateString()) {
         return 'Today at ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });

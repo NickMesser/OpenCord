@@ -15,6 +15,10 @@ const cache = new Map<string, { data: LinkPreviewData | null; ts: number }>();
 const CACHE_TTL = 5 * 60 * 1000;
 const inflight = new Map<string, Promise<LinkPreviewData | null>>();
 
+function isTauri(): boolean {
+	return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
+}
+
 export function extractUrls(text: string): string[] {
 	const matches = text.match(URL_REGEX);
 	if (!matches) return [];
@@ -24,6 +28,17 @@ export function extractUrls(text: string): string[] {
 		seen.add(u);
 		return true;
 	});
+}
+
+async function fetchPreviewViaTauri(url: string): Promise<LinkPreviewData | null> {
+	const { invoke } = await import('@tauri-apps/api/core');
+	return invoke<LinkPreviewData>('link_preview', { targetUrl: url });
+}
+
+async function fetchPreviewViaApi(url: string): Promise<LinkPreviewData | null> {
+	const resp = await fetch(`/api/link-preview?url=${encodeURIComponent(url)}`);
+	if (!resp.ok) return null;
+	return resp.json();
 }
 
 export async function fetchPreview(url: string): Promise<LinkPreviewData | null> {
@@ -39,12 +54,13 @@ export async function fetchPreview(url: string): Promise<LinkPreviewData | null>
 
 	const p = (async () => {
 		try {
-			const resp = await fetch(`/api/link-preview?url=${encodeURIComponent(url)}`);
-			if (!resp.ok) {
+			const data = isTauri()
+				? await fetchPreviewViaTauri(url)
+				: await fetchPreviewViaApi(url);
+			if (!data) {
 				cache.set(url, { data: null, ts: Date.now() - CACHE_TTL + FAIL_TTL });
 				return null;
 			}
-			const data: LinkPreviewData = await resp.json();
 			cache.set(url, { data, ts: Date.now() });
 			return data;
 		} catch {
